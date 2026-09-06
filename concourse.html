@@ -988,6 +988,7 @@
       // Simulation transport controls (CrowdFlow reference)
       function handleSkip() {
         audio.playBlip(500);
+        if (backendRef.current) { postAction({ action: "skip" }); pushToast(`⏩ +30 min fast-forward — inflow building at ${city.venueName}.`, "info"); return; }
         const next = clock + 30;
         setClock(next);
         setZones((prev) => advanceZones(prev, null, phaseAt(schedule, 960 + next), overflowActive));
@@ -996,6 +997,7 @@
 
       function handleReset() {
         audio.playBlip(380);
+        if (backendRef.current) { postAction({ action: "reset" }); setActionLog([]); pushToast("↺ Simulation reset — telemetry re-seeded to baseline.", "good"); return; }
         setZones(initCityZones(selectedCityKey));
         setShuttles(city.shuttleBaseline);
         setClock(0);
@@ -1009,6 +1011,12 @@
 
       function triggerShock(kind) {
         audio.playSurge();
+        const msgs = {
+          letout: "🎤 The concert just ended — 25,000 people are heading for transit and hotels.",
+          metro: "🚇 Metro disruption — trains are running at half capacity and the station is filling up.",
+          checkin: "🏨 Big check-in rush — hotel districts are filling up fast."
+        };
+        if (backendRef.current) { postAction({ action: "shock", kind }); pushToast(msgs[kind] || "⚡ Scenario injected on the backend.", "warn"); setActionLog((l) => [...l.slice(-49), `T+${clock}m — ${msgs[kind] || kind}`]); return; }
         const bumps = {
           letout: { venue: 20, transitHub: 12, transitE: 8, hotelN: 7, corridor: 14 },
           metro: { transitHub: 16, transitE: 9, corridor: 10, venue: -4 },
@@ -1016,11 +1024,6 @@
         };
         const b = bumps[kind];
         setZones((prev) => prev.map((z) => (b[z.id] ? { ...z, value: clamp(z.value + b[z.id], 5, 98) } : z)));
-        const msgs = {
-          letout: "🎤 The concert just ended — 25,000 people are heading for transit and hotels.",
-          metro: "🚇 Metro disruption — trains are running at half capacity and the station is filling up.",
-          checkin: "🏨 Big check-in rush — hotel districts are filling up fast."
-        };
         const msg = msgs[kind];
         pushToast(msg, "warn");
         setActionLog((l) => [...l.slice(-49), `T+${clock}m — ${msg}`]);
@@ -1029,6 +1032,13 @@
       // City Switcher
       function handleSelectCity(key) {
         audio.playBlip(800);
+        if (backendRef.current) {
+          setSelectedCityKey(key);
+          postAction({ action: "select_city", city: key });
+          setActionLog((l) => [...l, `T+${clock}m — Repositioned jurisdiction to ${CITIES_DATA[key]?.name || key}`]);
+          pushToast(`📍 Now viewing ${CITIES_DATA[key]?.name} (${CITIES_DATA[key]?.venueName}).`, "info");
+          return;
+        }
         setSelectedCityKey(key);
         const newCity = CITIES_DATA[key];
         setZones(initCityZones(key));
