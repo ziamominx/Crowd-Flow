@@ -802,7 +802,7 @@
       const [schedule, setSchedule] = useState(() => CITIES_DATA.navimumbai.schedule.map((p) => ({ ...p })));
       const [overflowActive, setOverflowActive] = useState(false);
       const phaseInfo = useMemo(() => {
-        const ph = phaseAt(schedule, clock);
+        const ph = phaseAt(schedule, 960 + clock);
         const p = schedule.find((x) => x.id === ph);
         if (p) return { label: p.label, color: p.color };
         return ph === "pre" ? { label: "Pre-Event", color: "#4FD8E0" } : { label: "Event Over", color: "#7C8AA0" };
@@ -833,7 +833,7 @@
       const clockRef = useRef(clock);
       const scheduleRef = useRef(schedule);
       const overflowRef = useRef(overflowActive);
-      const lastPhaseRef = useRef(phaseAt(schedule, 0));
+      const lastPhaseRef = useRef(phaseAt(schedule, 960));
 
       useEffect(() => { shuttlesRef.current = shuttles; }, [shuttles]);
       useEffect(() => { surgeRef.current = surge; }, [surge]);
@@ -907,7 +907,7 @@
         audio.playBlip(500);
         const next = clock + 30;
         setClock(next);
-        setZones((prev) => advanceZones(prev, null, phaseAt(schedule, next), overflowActive));
+        setZones((prev) => advanceZones(prev, null, phaseAt(schedule, 960 + next), overflowActive));
         pushToast(`⏩ +30 min fast-forward — inflow building at ${city.venueName}.`, "info");
       }
 
@@ -952,7 +952,7 @@
         setShuttles(newCity.shuttleBaseline);
         setSchedule(newCity.schedule.map((p) => ({ ...p })));
         setOverflowActive(false);
-        lastPhaseRef.current = phaseAt(newCity.schedule, 0);
+        lastPhaseRef.current = phaseAt(newCity.schedule, 960);
         setSelectedId("venue");
         setBriefing("");
         setChatMessages([]);
@@ -963,7 +963,7 @@
         if (!running) return;
         const interval = setInterval(() => {
           const now = clockRef.current;
-          const phId = phaseAt(scheduleRef.current, now);
+          const phId = phaseAt(scheduleRef.current, 960 + now);
           // Cascading schedule alerts — fire when the live event crosses phase boundaries
           if (lastPhaseRef.current && lastPhaseRef.current !== phId && phId === "exit") {
             pushToast(`🚪 ${city.venueName} exit phase has started — egress pressure is building on transit and the corridor.`, "warn");
@@ -1118,7 +1118,7 @@
             if (exit && exit.end < main.end + 60) exit.end = main.end + 60;
             note = `⏰ Main event extended 45 min — the exit surge is pushed later and softened.`;
           } else if (kind === "endearly") {
-            const nowClock = clockRef.current;
+            const nowClock = 960 + clockRef.current;
             next.forEach((p) => { if (p.start > nowClock) p.start = nowClock; if (p.end > nowClock) p.end = nowClock; });
             note = `🏁 ${city.venueName} ended early — the full egress surge is happening NOW.`;
           }
@@ -1559,8 +1559,8 @@
                   </div>
                   <div className="space-y-1.5 mb-3">
                     {schedule.map((p) => {
-                      const active = phaseAt(schedule, clock) === p.id;
-                      const done = clock >= p.end;
+                      const active = phaseAt(schedule, 960 + clock) === p.id;
+                      const done = 960 + clock >= p.end;
                       return (
                         <div key={p.id} className={`flex items-center justify-between text-[11px] px-2 py-1 rounded border ${active ? "bg-white/5 border-white/20" : done ? "border-[#1d2636] opacity-45" : "border-[#263042]"}`}>
                           <span className="flex items-center gap-1.5 font-medium text-[#E8EDF4]">
@@ -1925,8 +1925,8 @@
                 {schedule.map((p) => {
                   const left = ((p.start - 960) / 360) * 100;
                   const width = ((p.end - p.start) / 360) * 100;
-                  const done = clock >= p.end;
-                  const active = phaseAt(schedule, clock) === p.id;
+                  const done = 960 + clock >= p.end;
+                  const active = phaseAt(schedule, 960 + clock) === p.id;
                   return (
                     <div key={p.id} className="absolute top-0 bottom-0 transition-all duration-700"
                       style={{ left: `${clamp(left, 0, 100)}%`, width: `${clamp(width, 0, Math.max(0, 100 - clamp(left, 0, 100)))}%`, background: done ? p.color + "33" : p.color + (active ? "EE" : "99"), borderRight: "1px solid rgba(5,8,14,0.9)" }}
@@ -1942,7 +1942,7 @@
             </div>
             <div className="flex flex-wrap gap-x-3 gap-y-1.5 mt-2">
               {schedule.map((p) => {
-                const active = phaseAt(schedule, clock) === p.id;
+                const active = phaseAt(schedule, 960 + clock) === p.id;
                 return (
                   <span key={p.id} className="text-[10px] font-mono px-1.5 py-0.5 rounded border" style={active ? { color: p.color, borderColor: p.color + "66", background: p.color + "14" } : { color: "#7C8AA0", borderColor: "transparent" }}>
                     {p.label} {fmtMin(p.start)}
