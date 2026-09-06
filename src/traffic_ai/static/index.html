@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Bangalore Congestion System</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+
+    <!-- Leaflet JS for Real Interactive Map -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <!-- Chart.js for AI Predictions -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        :root {
+            --bg: #090e17;
+            --panel: rgba(15, 23, 42, 0.7);
+            --border: rgba(255, 255, 255, 0.1);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --red: #ef4444;
+            --yellow: #f59e0b;
+            --green: #10b981;
+            --blue: #3b82f6;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Inter', sans-serif;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text-main);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* HEADER */
+        header {
+            height: 60px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            background: rgba(9, 14, 23, 0.9);
+            z-index: 100;
+        }
+
+        .header-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 700;
+            font-size: 18px;
+            letter-spacing: 1px;
+            color: #fff;
+        }
+
+        .header-title span {
+            color: var(--blue);
+        }
+
+        .header-center {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-align: center;
+        }
+
+        /* MAIN LAYOUT */
+        .dashboard-container {
+            display: flex;
+            height: calc(100vh - 60px);
+        }
+
+        .sidebar-left,
+        .sidebar-right {
+            width: 350px;
+            background: rgba(9, 14, 23, 0.95);
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            padding: 15px;
+            overflow-y: auto;
+            z-index: 10;
+            border-right: 1px solid var(--border);
+        }
+
+        .sidebar-right {
+            border-right: none;
+            border-left: 1px solid var(--border);
+        }
+
+        .map-wrapper {
+            flex: 1;
+            position: relative;
+        }
+
+        #map {
+            width: 100%;
+            height: 100%;
+            background: #000;
+            z-index: 1;
+        }
+
+        /* PANELS */
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+        }
+
+        .panel-header {
+            font-size: 14px;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        /* WIDGETS */
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .metric-value {
+            font-size: 28px;
+            font-weight: 700;
+        }
+
+        .metric-label {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .alert-item {
+            display: flex;
+            gap: 12px;
+            padding: 12px;
+            background: rgba(239, 68, 68, 0.1);
+            border-left: 4px solid var(--red);
+            border-radius: 6px;
+            margin-bottom: 10px;
+        }
+
+        .alert-item.amber {
+            background: rgba(245, 158, 11, 0.1);
+            border-left-color: var(--yellow);
+        }
+
+        .alert-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #fff;
+        }
+
+        .alert-desc {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .route-item {
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 8px;
+            margin-bottom: 10px;
+            border: 1px solid var(--border);
+        }
+
+        .route-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .route-bar {
+            height: 6px;
+            background: #334155;
+            border-radius: 3px;
+            overflow: hidden;
+            display: flex;
+        }
+
+        .route-segment.smooth {
+            background: var(--green);
+        }
+
+        .route-segment.heavy {
+            background: var(--red);
+        }
+
+        /* Map Overlays */
+        .map-legend {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--panel);
+            padding: 10px 20px;
+            border-radius: 30px;
+            display: flex;
+            gap: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            z-index: 400;
+            border: 1px solid var(--border);
+            backdrop-filter: blur(10px);
+        }
+
+        .legend-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 6px;
+        }
+
+        /* Custom Leaflet glow markers */
+        .glow-marker {
+            border-radius: 50%;
+            box-shadow: 0 0 20px 10px rgba(239, 68, 68, 0.6);
+            background: var(--red);
+            border: 2px solid #fff;
+            animation: pulse 2s infinite;
+        }
+
+        .glow-marker.amber {
+            box-shadow: 0 0 20px 10px rgba(245, 158, 11, 0.6);
+            background: var(--yellow);
+        }
+
+        @keyframes pulse {
+            0% {
+                transform: scale(0.9);
+                opacity: 1;
+            }
+
+            50% {
+                transform: scale(1.2);
+                opacity: 0.8;
+            }
+
+            100% {
+                transform: scale(0.9);
+                opacity: 1;
+            }
+        }
+
+        canvas {
+            width: 100% !important;
+            height: 150px !important;
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <div class="header-title">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round" style="color:var(--blue);">
+                <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                <polyline points="2 17 12 22 22 17"></polyline>
+                <polyline points="2 12 12 17 22 12"></polyline>
+            </svg>
+            AI BANGALORE CONGESTION SYSTEM
+        </div>
+        <div class="header-center" id="clock">18:15:30 <br><span style="font-size:10px; color:#64748b;">LIVE TELEMETRY
+                FROM BACKEND</span></div>
+        <div style="font-size: 13px; font-weight: 600; display:flex; align-items:center; gap: 12px;">
+            <a href="/concourse" style="color: #a78bfa; background: #1e1b4b; border: 1px solid #7c3aed; padding: 5px 12px; border-radius: 4px; text-decoration: none; font-size: 11px; font-weight: 600; display:flex; align-items:center; gap:5px;">
+                🌍 Concourse Global Grid →
+            </a>
+            <div
+                style="width:30px; height:30px; background:#334155; border-radius:50%; display:flex; align-items:center; justify-content:center;">
+                A</div> Admin
+        </div>
+    </header>
+
+    <div class="dashboard-container">
+        <!-- LEFT SIDEBAR -->
+        <div class="sidebar-left">
+            <div class="panel">
+                <div class="panel-header" style="justify-content: space-between; align-items:center;">
+                    Real-Time Target Insights
+                    <button id="rainToggle" onclick="toggleRainMode()"
+                        style="background: linear-gradient(135deg, #1e293b 0%, #334155 100%); color: #fff; border: 1px solid #38bdf8; border-radius: 4px; padding: 4px 8px; font-size: 10px; cursor: pointer; font-weight: bold; transition: all 0.3s ease;">☔
+                        RAIN MODE OFF</button>
+                </div>
+                <div class="metric-row">
+                    <div>
+                        <div class="metric-value" style="color: var(--red);">78% <span
+                                style="font-size:14px; font-weight:600;">High</span></div>
+                        <div class="metric-label">Bangalore Traffic Index</div>
+                    </div>
+                </div>
+                <div class="metric-row">
+                    <div>
+                        <div class="metric-value" style="color: var(--yellow);">34 min <span
+                                style="font-size:14px; font-weight:600; color:var(--red);">+9m</span></div>
+                        <div class="metric-label">Avg. Travel Time Delay</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header">Alerts & Incidents</div>
+                <div id="alerts-container">
+                    <div class="alert-item">
+                        <div style="margin-top:2px;">🚨</div>
+                        <div>
+                            <div class="alert-title">Waterlogging at Tin Factory</div>
+                            <div class="alert-desc">Severity <span
+                                    style="color:var(--red); font-weight:bold;">High</span></div>
+                        </div>
+                    </div>
+                    <div class="alert-item amber">
+                        <div style="margin-top:2px;">⚠️</div>
+                        <div>
+                            <div class="alert-title" id="ai-live-alert">AI: Heavy Surge at MG Road</div>
+                            <div class="alert-desc">Adjusting signal timings dynamically</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel" style="flex:1;">
+                <div class="panel-header">AI Predictions (Traffic Forecast)</div>
+                <div style="position: relative; height: 150px; width:100%;">
+                    <canvas id="predictionChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- CENTER MAP -->
+        <div class="map-wrapper">
+            <div class="map-legend">
+                <span><span class="legend-dot" style="background:var(--green);"></span> Smooth</span>
+                <span><span class="legend-dot" style="background:var(--yellow);"></span> Moderate</span>
+                <span><span class="legend-dot" style="background:var(--red);"></span> Heavy Congestion</span>
+                <span><span class="legend-dot" style="background:#b91c1c;"></span> Gridlock</span>
+            </div>
+            <div id="map"></div>
+        </div>
+
+        <!-- RIGHT SIDEBAR -->
+        <div class="sidebar-right">
+            <div class="panel">
+                <div class="panel-header">Live Telemetry (MG Road)</div>
+                <div style="text-align: center; margin-bottom: 20px;">
+                    <div style="font-size:48px; font-weight:800; color:var(--green); letter-spacing:-1px;"
+                        id="live-green-time">44s</div>
+                    <div style="font-size:12px; color:var(--text-muted); text-transform:uppercase; letter-spacing:2px;">
+                        AI Green Allocation</div>
+                </div>
+                <div class="metric-row">
+                    <div class="metric-label">Vehicles Detected</div>
+                    <div class="metric-value" style="font-size:20px;" id="live-vehicles">--</div>
+                </div>
+                <div class="metric-row">
+                    <div class="metric-label">Pedestrian Density</div>
+                    <div class="metric-value" style="font-size:20px;" id="live-crowd">--</div>
+                </div>
+                <div class="metric-row">
+                    <div class="metric-label">Active Policy Engine</div>
+                    <div class="metric-value" style="font-size:14px; color:var(--blue);" id="live-reason">--</div>
+                </div>
+                <button onclick="pollAI()"
+                    style="width:100%; padding:12px; background:var(--blue); color:#fff; border:none; border-radius:6px; font-weight:600; cursor:pointer; margin-top:10px;">FORCE
+                    SYNC</button>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header">Route Management</div>
+
+                <div class="route-item">
+                    <div class="route-header">
+                        <span>Whitefield to Electronic City</span>
+                        <span>43.5 min</span>
+                    </div>
+                    <div style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">via Varthur, ORR</div>
+                    <div class="route-bar">
+                        <div class="route-segment smooth" style="width: 40%;"></div>
+                        <div class="route-segment heavy" style="width: 30%;"></div>
+                        <div class="route-segment smooth" style="width: 30%;"></div>
+                    </div>
+                </div>
+
+                <div class="route-item">
+                    <div class="route-header">
+                        <span>Majestic to Hebbal Flyover</span>
+                        <span style="color:var(--red);">52.0 min</span>
+                    </div>
+                    <div style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">via Bellary Road</div>
+                    <div class="route-bar">
+                        <div class="route-segment smooth" style="width: 20%;"></div>
+                        <div class="route-segment heavy" style="width: 80%; background:#b91c1c;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+                <div class="panel-header">System Live Log</div>
+                <div id="terminal-feed"
+                    style="flex:1; background: rgba(0,0,0,0.8); border: 1px solid #334155; border-radius: 8px; padding: 10px; font-family: monospace; font-size: 11px; color: #4ade80; overflow-y: auto; text-shadow: 0 0 5px rgba(74, 222, 128, 0.5);">
+                    > System Boot... MLOps Engine Online.<br>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Clock Update
+        setInterval(() => {
+            const now = new Date();
+            document.getElementById('clock').innerHTML = now.toLocaleTimeString() + '<br><span style="font-size:10px; color:#64748b;">' + now.toDateString() + '</span>';
+        }, 1000);
+
+        // Initialize Map (Dark theme CartoDB) over Bangalore
+        const map = L.map('map', { zoomControl: false }).setView([12.9716, 77.5946], 12);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; CARTO',
+            subdomains: 'abcd',
+            maxZoom: 20
+        }).addTo(map);
+
+        // Add Glowing Markers properly anchored to real Geo-Coordinates
+        // Native circle markers prevent the top-left CSS rendering glitch
+        const mgRoad = L.circleMarker([12.9716, 77.5946], {
+            radius: 12, color: '#ef4444', fillColor: '#ef4444', fillOpacity: 0.8, className: 'pulse'
+        }).addTo(map).bindPopup("<b>MG Road</b><br>CRITICAL EVENT ACTIVE");
+
+        L.circleMarker([12.9165, 77.6101], {
+            radius: 10, color: '#ef4444', fillColor: '#ef4444', fillOpacity: 0.6
+        }).addTo(map).bindPopup("<b>Silk Board</b><br>Gridlock detected");
+
+        L.circleMarker([13.0354, 77.5988], {
+            radius: 8, color: '#f59e0b', fillColor: '#f59e0b', fillOpacity: 0.6
+        }).addTo(map).bindPopup("<b>Hebbal</b><br>Moderate congestion");
+
+        // Pan the map slightly to center the MG Road threat dynamically
+        map.panTo([12.9716, 77.5946]);
+
+        let isRainMode = false;
+
+        function toggleRainMode() {
+            isRainMode = !isRainMode;
+            const btn = document.getElementById('rainToggle');
+            if (isRainMode) {
+                btn.style.background = 'linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%)';
+                btn.style.color = '#bfdbfe';
+                btn.innerHTML = '⛈️ RAIN MODE ACTIVE (SEVERE)';
+            } else {
+                btn.style.background = 'linear-gradient(135deg, #1e293b 0%, #334155 100%)';
+                btn.style.color = '#fff';
+                btn.innerHTML = '☔ ENABLE RAIN MODE';
+            }
+            fetchLiveAI();
+        }
+
+        function appendToTerminal(logText) {
+            const feed = document.getElementById('terminal-feed');
+            const time = new Date().toLocaleTimeString();
+            feed.innerHTML += `[${time}] > ${logText}<br>`;
+            feed.scrollTop = feed.scrollHeight; // Auto-scroll to bottom
+        }
+
+        async function fetchLiveAI() {
+            try {
+                // Incorporate the Rain Mode Query execution natively
+                const weatherParam = isRainMode ? 'rain' : 'clear';
+                const res = await fetch('/intersection/mg_road/live?weather=' + weatherParam);
+                const data = await res.json();
+
+                // Update DOM metrics in the Right Sidebar Telemetry panel
+                document.getElementById('live-vehicles').innerText = data.features.vehicles;
+                document.getElementById('live-crowd').innerText = (data.features.crowd_density * 100).toFixed(0) + "%";
+                document.getElementById('live-green-time').innerText = data.decision.green + "s";
+                document.getElementById('live-reason').innerText = data.decision.reason;
+
+                // Handle dynamic Risk/Event alerts mapped to the Left Sidebar alert panel
+                if (data.features.event_risk === "CRITICAL" || data.features.event_risk === "HIGH") {
+                    document.getElementById('ai-live-alert').innerText = "AI ACTIVE ALERT: " + data.features.event_risk + " SCALED EVENT";
+                    document.getElementById('ai-live-alert').style.color = "var(--danger)";
+                } else if (data.features.emergency) {
+                    document.getElementById('ai-live-alert').innerText = "AI OVERRIDE: AMBULANCE DETECTED";
+                    document.getElementById('ai-live-alert').style.color = "var(--danger)";
+                } else if (isRainMode) {
+                    document.getElementById('ai-live-alert').innerText = "AI OVERRIDE: SEVERE MONSOON MODE";
+                    document.getElementById('ai-live-alert').style.color = "#38bdf8";
+                } else {
+                    document.getElementById('ai-live-alert').innerText = "AI: " + data.decision.reason;
+                    document.getElementById('ai-live-alert').style.color = "#fff";
+                }
+
+                // Add to Live Terminal Log
+                const log = `Eval: Vehicles=${data.features.vehicles} | Weather=${weatherParam} -> GREEN=${data.decision.green}s. Reason: '${data.decision.reason}'`;
+                appendToTerminal(log);
+
+            } catch (error) {
+                console.error("AI Server Offline", error);
+                document.getElementById('ai-reason').innerText = "CONNECTION LOST.";
+            }
+        }
+
+        // Initial load
+        setTimeout(fetchLiveAI, 500);
+    </script>
+</body>
+
+</html>

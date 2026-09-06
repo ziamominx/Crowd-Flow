@@ -1,0 +1,19 @@
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Local generated data & caches
+cache/
+data/
+*.sqlite
+*.sqlite3
+
+# Agent workspace
+.freebuff/
