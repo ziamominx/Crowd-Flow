@@ -1,0 +1,1445 @@
+
+    const { useState, useEffect, useMemo, useRef, useCallback } = React;
+
+    // ==========================================
+    // 🔊 LUSION WEB AUDIO SYNTHESIZER
+    // ==========================================
+    class SoundEngine {
+      constructor() {
+        this.ctx = null;
+        this.enabled = true;
+      }
+      init() {
+        if (!this.ctx) {
+          const AudioCtx = window.AudioContext || window.webkitAudioContext;
+          if (AudioCtx) this.ctx = new AudioCtx();
+        }
+      }
+      playBlip(freq = 520, type = "sine", duration = 0.08) {
+        if (!this.enabled) return;
+        try {
+          this.init();
+          if (!this.ctx) return;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = type;
+          osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+          gain.gain.setValueAtTime(0.04, this.ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + duration);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start();
+          osc.stop(this.ctx.currentTime + duration);
+        } catch(e) {}
+      }
+      playSurge() {
+        if (!this.enabled) return;
+        try {
+          this.init();
+          if (!this.ctx) return;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = "triangle";
+          osc.frequency.setValueAtTime(140, this.ctx.currentTime);
+          osc.frequency.exponentialRampToValueAtTime(45, this.ctx.currentTime + 0.4);
+          gain.gain.setValueAtTime(0.08, this.ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + 0.45);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start();
+          osc.stop(this.ctx.currentTime + 0.45);
+        } catch(e) {}
+      }
+    }
+    const audio = new SoundEngine();
+
+    // ==========================================
+    // 🧩 ICON SET (lucide-style inline SVGs)
+    // ==========================================
+    const ICON_PATHS = {
+      orbit: (
+        <>
+          <circle cx="12" cy="12" r="3" />
+          <circle cx="19" cy="5" r="2" />
+          <circle cx="5" cy="19" r="2" />
+          <path d="M10.4 21.9a10 10 0 0 0 9.941-15.416" />
+          <path d="M13.5 2.1a10 10 0 0 0-9.841 15.416" />
+        </>
+      ),
+      globe: (
+        <>
+          <circle cx="12" cy="12" r="10" />
+          <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
+          <path d="M2 12h20" />
+        </>
+      ),
+      gauge: (
+        <>
+          <path d="m12 14 4-4" />
+          <path d="M3.34 19a10 10 0 1 1 17.32 0" />
+        </>
+      ),
+      car: (
+        <>
+          <path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2" />
+          <circle cx="7" cy="17" r="2" />
+          <path d="M9 17h6" />
+          <circle cx="17" cy="17" r="2" />
+        </>
+      ),
+      alert: (
+        <>
+          <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 20h16a2 2 0 0 0 1.73-2" />
+          <path d="M12 9v4" />
+          <path d="M12 17h.01" />
+        </>
+      ),
+      activity: (
+        <path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" />
+      ),
+      "cloud-rain": (
+        <>
+          <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242" />
+          <path d="M16 14v6" />
+          <path d="M8 14v6" />
+          <path d="M12 16v6" />
+        </>
+      ),
+      siren: (
+        <>
+          <path d="M7 18v-6a5 5 0 1 1 10 0v6" />
+          <path d="M5 21a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-1a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2z" />
+          <path d="M21 12h1" />
+          <path d="M18.5 4.5 18 5" />
+          <path d="M2 12h1" />
+          <path d="M12 2v1" />
+          <path d="m4.929 4.929.707.707" />
+          <path d="M12 12v6" />
+        </>
+      ),
+      zap: (
+        <path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z" />
+      ),
+      bus: (
+        <>
+          <path d="M8 6v6" />
+          <path d="M15 6v6" />
+          <path d="M2 12h19.6" />
+          <path d="M18 18h3s.5-1.7.8-2.8c.1-.4.2-.8.2-1.2 0-.4-.1-.8-.2-1.2l-1.4-5C20.1 6.8 19.1 6 18 6H4a2 2 0 0 0-2 2v10h3" />
+          <circle cx="7" cy="18" r="2" />
+          <path d="M9 18h5" />
+          <circle cx="16" cy="18" r="2" />
+        </>
+      ),
+      minus: <path d="M5 12h14" />,
+      plus: (
+        <>
+          <path d="M5 12h14" />
+          <path d="M12 5v14" />
+        </>
+      ),
+      sparkles: (
+        <>
+          <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
+          <path d="M20 3v4" />
+          <path d="M22 5h-4" />
+        </>
+      ),
+      hotel: (
+        <>
+          <path d="M10 22v-6.57" />
+          <path d="M12 11h.01" />
+          <path d="M12 7h.01" />
+          <path d="M14 15.43V22" />
+          <path d="M15 16a5 5 0 0 0-6 0" />
+          <path d="M16 11h.01" />
+          <path d="M16 7h.01" />
+          <path d="M8 11h.01" />
+          <path d="M8 7h.01" />
+          <rect x="4" y="2" width="16" height="20" rx="2" />
+        </>
+      ),
+      send: (
+        <>
+          <path d="m22 2-7 20-4-9-9-4Z" />
+          <path d="M22 2 11 13" />
+        </>
+      )
+    };
+
+    function Icon({ name, size = 16, className = "" }) {
+      return (
+        <svg
+          width={size}
+          height={size}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={className}
+          aria-hidden="true"
+        >
+          {ICON_PATHS[name] || <circle cx="12" cy="12" r="9" />}
+        </svg>
+      );
+    }
+
+    // ==========================================
+    // 🎨 PALETTE & MULTI-CITY REGISTRY
+    // ==========================================
+    const COLORS = {
+      normal: "#4FD8E0",
+      warning: "#F5A623",
+      critical: "#FF5C6C",
+      ai: "#8B7CF6",
+      cyan: "#06B6D4",
+      emerald: "#10B981"
+    };
+
+    const CITIES_DATA = {
+      london: {
+        id: "london",
+        name: "London, United Kingdom",
+        flag: "🇬🇧",
+        venueName: "Wembley Stadium",
+        eventName: "UEFA European Final & World Arena Concert",
+        coords: "51.5560° N, 0.2795° W",
+        currency: "£",
+        speedUnit: "mph",
+        shuttleLabel: "Double-Decker / Feeder Shuttles",
+        zones: [
+          { id: "venue", name: "Wembley Stadium Core", type: "venue", baseline: 58, capacityLabel: "85,000 capacity", unit: "stadium density", x: 130, y: 150 },
+          { id: "transitHub", name: "Wembley Park (Jubilee/Metro)", type: "transit", baseline: 52, capacityLabel: "24 trains/hr", unit: "station load", x: 300, y: 90 },
+          { id: "transitE", name: "Olympic Way & Bakerloo Feeder", type: "transit", baseline: 36, capacityLabel: "14 trains/hr", unit: "pedestrian flow", x: 300, y: 210 },
+          { id: "hotelN", name: "Wembley Park Hotel District", type: "hotel", baseline: 74, capacityLabel: "4,200 rooms", unit: "room occupancy", x: 470, y: 80 },
+          { id: "hotelS", name: "Central London West End District", type: "hotel", baseline: 42, capacityLabel: "9,500 rooms", unit: "room occupancy", x: 470, y: 220 },
+          { id: "corridor", name: "North Circular A406 Artery", type: "corridor", baseline: 64, capacityLabel: "4,500 veh/hr", unit: "arterial load", x: 210, y: 280 }
+        ],
+        shuttleBaseline: { transitHub: 16, transitE: 10 }
+      },
+      newyork: {
+        id: "newyork",
+        name: "New York / NJ, USA",
+        flag: "🇺🇸",
+        venueName: "MetLife Stadium",
+        eventName: "World Cup Finals & Summer Music Festival",
+        coords: "40.8128° N, 74.0742° W",
+        currency: "$",
+        speedUnit: "mph",
+        shuttleLabel: "NJ Transit Express Coaches",
+        zones: [
+          { id: "venue", name: "MetLife Stadium Core", type: "venue", baseline: 62, capacityLabel: "82,500 capacity", unit: "stadium density", x: 130, y: 150 },
+          { id: "transitHub", name: "Secaucus Junction Rail Hub", type: "transit", baseline: 54, capacityLabel: "28 trains/hr", unit: "concourse load", x: 300, y: 90 },
+          { id: "transitE", name: "Lincoln Tunnel Express Corridor", type: "transit", baseline: 40, capacityLabel: "35 coaches/hr", unit: "corridor load", x: 300, y: 210 },
+          { id: "hotelN", name: "Midtown Manhattan Hotels", type: "hotel", baseline: 78, capacityLabel: "14,000 rooms", unit: "room occupancy", x: 470, y: 80 },
+          { id: "hotelS", name: "Jersey City & Hoboken District", type: "hotel", baseline: 44, capacityLabel: "6,200 rooms", unit: "room occupancy", x: 470, y: 220 },
+          { id: "corridor", name: "Route 3 & NJ Turnpike Bottleneck", type: "corridor", baseline: 68, capacityLabel: "5,800 veh/hr", unit: "arterial load", x: 210, y: 280 }
+        ],
+        shuttleBaseline: { transitHub: 20, transitE: 12 }
+      },
+      tokyo: {
+        id: "tokyo",
+        name: "Tokyo, Japan",
+        flag: "🇯🇵",
+        venueName: "Japan National Stadium",
+        eventName: "World Athletics Championships & Tech Expo",
+        coords: "35.6778° N, 139.7145° E",
+        currency: "¥",
+        speedUnit: "km/h",
+        shuttleLabel: "Toei & Metro Shuttles",
+        zones: [
+          { id: "venue", name: "National Stadium Core", type: "venue", baseline: 54, capacityLabel: "68,000 capacity", unit: "arena density", x: 130, y: 150 },
+          { id: "transitHub", name: "Sendagaya & Yamanote Loop", type: "transit", baseline: 48, capacityLabel: "36 trains/hr", unit: "platform density", x: 300, y: 90 },
+          { id: "transitE", name: "Toei Oedo & Chuo-Sobu Line", type: "transit", baseline: 34, capacityLabel: "22 trains/hr", unit: "passenger flow", x: 300, y: 210 },
+          { id: "hotelN", name: "Shinjuku Central Hotel District", type: "hotel", baseline: 70, capacityLabel: "11,000 rooms", unit: "room occupancy", x: 470, y: 80 },
+          { id: "hotelS", name: "Roppongi & Shinagawa District", type: "hotel", baseline: 38, capacityLabel: "7,500 rooms", unit: "room occupancy", x: 470, y: 220 },
+          { id: "corridor", name: "Shuto Expressway C1 Loop", type: "corridor", baseline: 56, capacityLabel: "4,000 veh/hr", unit: "arterial load", x: 210, y: 280 }
+        ],
+        shuttleBaseline: { transitHub: 18, transitE: 12 }
+      },
+      bengaluru: {
+        id: "bengaluru",
+        name: "Bengaluru, India",
+        flag: "🇮🇳",
+        venueName: "Kanteerava Stadium & KTPO",
+        eventName: "GIDS Global Developer Summit & IPL Match",
+        coords: "12.9716° N, 77.5946° E",
+        currency: "₹",
+        speedUnit: "km/h",
+        shuttleLabel: "BMTC & Metro Feeder Volvos",
+        zones: [
+          { id: "venue", name: "Kanteerava Arena Core", type: "venue", baseline: 55, capacityLabel: "35,000 capacity", unit: "arena density", x: 130, y: 150 },
+          { id: "transitHub", name: "Majestic Central Interconnect", type: "transit", baseline: 50, capacityLabel: "Purple/Green lines", unit: "transit load", x: 300, y: 90 },
+          { id: "transitE", name: "Silk Board & ORR Feeder Shuttles", type: "transit", baseline: 38, capacityLabel: "16 feeder routes", unit: "transit load", x: 300, y: 210 },
+          { id: "hotelN", name: "MG Road & Indiranagar District", type: "hotel", baseline: 72, capacityLabel: "4,500 rooms", unit: "room occupancy", x: 470, y: 80 },
+          { id: "hotelS", name: "Electronic City & Koramangala", type: "hotel", baseline: 40, capacityLabel: "3,800 rooms", unit: "room occupancy", x: 470, y: 220 },
+          { id: "corridor", name: "Hebbal Flyover & Outer Ring Artery", type: "corridor", baseline: 66, capacityLabel: "4,600 veh/hr", unit: "arterial load", x: 210, y: 280 }
+        ],
+        shuttleBaseline: { transitHub: 12, transitE: 8 }
+      },
+      dubai: {
+        id: "dubai",
+        name: "Dubai, UAE",
+        flag: "🇦🇪",
+        venueName: "Coca-Cola Arena & Expo City",
+        eventName: "World Government Summit & Mega Concert",
+        coords: "25.2048° N, 55.2708° E",
+        currency: "AED",
+        speedUnit: "km/h",
+        shuttleLabel: "RTA Premium Event Buses",
+        zones: [
+          { id: "venue", name: "Coca-Cola Arena Core", type: "venue", baseline: 52, capacityLabel: "17,000 capacity", unit: "arena density", x: 130, y: 150 },
+          { id: "transitHub", name: "Burj Khalifa / Dubai Mall Metro", type: "transit", baseline: 46, capacityLabel: "Red Line Metro", unit: "platform load", x: 300, y: 90 },
+          { id: "transitE", name: "Expo 2020 Route 2020 Feeder", type: "transit", baseline: 32, capacityLabel: "12 express lines", unit: "feeder load", x: 300, y: 210 },
+          { id: "hotelN", name: "Downtown & Business Bay Hotels", type: "hotel", baseline: 76, capacityLabel: "8,500 rooms", unit: "room occupancy", x: 470, y: 80 },
+          { id: "hotelS", name: "Dubai Marina & JBR District", type: "hotel", baseline: 36, capacityLabel: "7,000 rooms", unit: "room occupancy", x: 470, y: 220 },
+          { id: "corridor", name: "Sheikh Zayed Road (E11) Arterial", type: "corridor", baseline: 62, capacityLabel: "6,200 veh/hr", unit: "highway load", x: 210, y: 280 }
+        ],
+        shuttleBaseline: { transitHub: 14, transitE: 10 }
+      }
+    };
+
+    const SURGE_SCRIPT = {
+      venue: [10, 6, -10, -22, -18, -8],
+      transitHub: [3, 9, 18, 24, 15, 7],
+      transitE: [1, 4, 8, 14, 9, 4],
+      hotelN: [2, 3, 4, 5, 4, 2],
+      hotelS: [0, 1, 2, 3, 2, 1],
+      corridor: [4, 10, 19, 22, 16, 8]
+    };
+
+    function clamp(v, min = 0, max = 100) {
+      return Math.max(min, Math.min(max, v));
+    }
+
+    function fmtMin(m) {
+      return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(Math.floor(m % 60)).padStart(2, "0")}`;
+    }
+
+    function seedHistory(baseline) {
+      const hist = [];
+      for (let i = -5; i <= 0; i++) {
+        hist.push({ t: i, v: clamp(baseline + Math.sin(i) * 3 + (i % 2 === 0 ? 2 : -2)) });
+      }
+      return hist;
+    }
+
+    function initCityZones(cityKey) {
+      const city = CITIES_DATA[cityKey] || CITIES_DATA.london;
+      return city.zones.map((z) => {
+        const history = seedHistory(z.baseline);
+        return {
+          ...z,
+          value: history[history.length - 1].v,
+          forecast: z.baseline,
+          history,
+          speed: Math.round(60 * Math.exp(-0.035 * (z.baseline / 10))),
+          flow: Math.round(z.baseline * 42)
+        };
+      });
+    }
+
+    function statusOf(v) {
+      if (v >= 82) return "critical";
+      if (v >= 68) return "warning";
+      return "normal";
+    }
+
+    function statusWord(v) {
+      if (v >= 82) return "Crowded";
+      if (v >= 68) return "Busy";
+      return "Calm";
+    }
+
+    // ==========================================
+    // 💡 INTERACTIVE CARD WITH CURSOR SPOTLIGHT
+    // ==========================================
+    function SpotlightCard({ children, className = "", onClick, selected, accent }) {
+      const cardRef = useRef(null);
+      const [pos, setPos] = useState({ x: -1000, y: -1000 });
+
+      const onMouseMove = (e) => {
+        if (!cardRef.current) return;
+        const rect = cardRef.current.getBoundingClientRect();
+        setPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+      };
+
+      const onMouseLeave = () => setPos({ x: -1000, y: -1000 });
+
+      return (
+        <div
+          ref={cardRef}
+          onMouseMove={onMouseMove}
+          onMouseLeave={onMouseLeave}
+          onClick={onClick}
+          className={`lusion-card rounded-md ${className}`}
+          style={{
+            borderColor: selected ? "#8B7CF6" : undefined,
+            boxShadow: selected ? "0 0 25px rgba(139, 124, 246, 0.25)" : accent ? `inset 3px 0 0 0 ${accent}` : undefined
+          }}
+        >
+          {/* Cursor Spotlight Glow */}
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              pointerEvents: "none",
+              background: `radial-gradient(circle 180px at ${pos.x}px ${pos.y}px, rgba(139, 124, 246, 0.15), transparent 80%)`,
+              transition: "opacity 0.2s ease"
+            }}
+          />
+          {children}
+        </div>
+      );
+    }
+
+    // ==========================================
+    // 🗺️ KINETIC DIGITAL TWIN TOPOLOGY MAP (SVG)
+    // ==========================================
+    function KineticTopologyMap({ zones, selectedId, onSelectZone, isRain, isEmergency, surgeActive }) {
+      return (
+        <SpotlightCard className="p-4 overflow-hidden">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-purple-400 beacon-pulse"></span>
+              <span className="text-[11px] uppercase tracking-widest text-[#7C8AA0] font-semibold font-mono">
+                Live City Map
+              </span>
+            </div>
+            <div className="flex items-center gap-3 text-[10px] font-mono text-[#7C8AA0]">
+              <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[#10B981]"></span> Calm</span>
+              <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[#F5A623]"></span> Busy</span>
+              <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[#FF5C6C]"></span> Crowded</span>
+            </div>
+          </div>
+
+          <div className="relative w-full h-[220px] bg-[#05080E]/90 border border-[#1b2434] rounded flex items-center justify-center overflow-hidden">
+            {/* Ambient Vector Grid Lines */}
+            <svg viewBox="0 0 580 320" className="w-full h-full">
+              <defs>
+                <linearGradient id="edgeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#8B7CF6" stopOpacity="0.6" />
+                  <stop offset="100%" stopColor="#4FD8E0" stopOpacity="0.4" />
+                </linearGradient>
+                <filter id="lusionGlow" x="-30%" y="-30%" width="160%" height="160%">
+                  <feGaussianBlur stdDeviation="5" result="blur" />
+                  <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                </filter>
+              </defs>
+
+              {/* Connected Topology Edges */}
+              <line x1="130" y1="150" x2="300" y2="90" stroke="url(#edgeGrad)" strokeWidth="2" strokeDasharray="5 3" />
+              <line x1="130" y1="150" x2="300" y2="210" stroke="url(#edgeGrad)" strokeWidth="2" strokeDasharray="5 3" />
+              <line x1="130" y1="150" x2="210" y2="280" stroke="url(#edgeGrad)" strokeWidth="2" />
+              <line x1="300" y1="90" x2="470" y2="80" stroke="url(#edgeGrad)" strokeWidth="2" />
+              <line x1="300" y1="210" x2="470" y2="220" stroke="url(#edgeGrad)" strokeWidth="2" />
+
+              {/* Animated Flow Packets */}
+              <circle r="3.5" fill="#4FD8E0" filter="url(#lusionGlow)">
+                <animateMotion path="M 130 150 L 300 90 L 470 80" dur={surgeActive ? "1.8s" : "3.6s"} repeatCount="indefinite" />
+              </circle>
+              <circle r="3.5" fill="#8B7CF6" filter="url(#lusionGlow)">
+                <animateMotion path="M 130 150 L 300 210 L 470 220" dur={surgeActive ? "2.1s" : "4.2s"} repeatCount="indefinite" />
+              </circle>
+              <circle r="3" fill="#F5A623">
+                <animateMotion path="M 130 150 L 210 280" dur="2.8s" repeatCount="indefinite" />
+              </circle>
+
+              {/* Nodes */}
+              {zones.map((z) => {
+                const isSel = z.id === selectedId;
+                const col = COLORS[statusOf(z.value)];
+                return (
+                  <g key={z.id} onClick={() => { audio.playBlip(640); onSelectZone(z.id); }} className="cursor-pointer">
+                    <circle cx={z.x} cy={z.y} r={isSel ? 26 : 18} fill={col} fillOpacity={isSel ? 0.35 : 0.14} stroke={col} strokeWidth={isSel ? 2.5 : 1} filter={statusOf(z.value) === "critical" ? "url(#lusionGlow)" : undefined} />
+                    <circle cx={z.x} cy={z.y} r="7" fill={col} />
+                    <circle cx={z.x} cy={z.y} r="14" fill="none" stroke={col} strokeWidth="0.8" opacity="0.4" className="beacon-pulse" />
+                    <text x={z.x} y={z.y + (z.y > 180 ? 25 : -22)} textAnchor="middle" fill="#E8EDF4" fontSize="10" fontFamily="'Space Grotesk', sans-serif" fontWeight="600" letterSpacing="0.05em">
+                      {z.name.split(" ")[0]} ({z.value.toFixed(0)}%)
+                    </text>
+                  </g>
+                );
+              })}
+            </svg>
+
+            {isEmergency && (
+              <div className="absolute top-3 right-3 flex items-center gap-1.5 bg-red-950/80 border border-red-500/60 px-2.5 py-1 rounded text-[10px] text-red-300 font-mono tracking-wider animate-pulse">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-400"></span> Ambulance route active — lights cleared
+              </div>
+            )}
+
+            {isRain && (
+              <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-sky-950/80 border border-sky-400/60 px-2.5 py-1 rounded text-[10px] text-sky-300 font-mono tracking-wider">
+                <span className="w-1.5 h-1.5 rounded-full bg-sky-400"></span> Heavy rain — travel times up ~30%
+              </div>
+            )}
+          </div>
+        </SpotlightCard>
+      );
+    }
+
+    // ==========================================
+    // 📊 KINETIC SPARKLINE & MINI CHARTS
+    // ==========================================
+    function KineticSparkline({ history, color }) {
+      const w = 90, h = 26;
+      const vals = history.map((p) => p.v);
+      const min = Math.min(...vals) - 2;
+      const max = Math.max(...vals) + 2;
+      const pts = vals.map((v, i) => {
+        const x = (i / (vals.length - 1)) * w;
+        const y = h - ((v - min) / (max - min || 1)) * h;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      }).join(" ");
+
+      return (
+        <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="overflow-visible">
+          <polyline points={pts} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    }
+
+    // ==========================================
+    // 🚀 MAIN APPLICATION CONTROLLER
+    // ==========================================
+    function App() {
+      const [selectedCityKey, setSelectedCityKey] = useState("london");
+      const city = CITIES_DATA[selectedCityKey];
+
+      const [zones, setZones] = useState(() => initCityZones("london"));
+      const [shuttles, setShuttles] = useState(() => CITIES_DATA.london.shuttleBaseline);
+      const [surge, setSurge] = useState({ active: false, step: 0 });
+      const [selectedId, setSelectedId] = useState("venue");
+      const [view, setView] = useState("organizer");
+      const [actionLog, setActionLog] = useState([]);
+      const [clock, setClock] = useState(0);
+
+      // Physics states
+      const [isRain, setIsRain] = useState(false);
+      const [isEmergency, setIsEmergency] = useState(false);
+      const [signalExtended, setSignalExtended] = useState(false);
+      const [soundActive, setSoundActive] = useState(true);
+
+      // Simulation transport controls (CrowdFlow reference)
+      const [running, setRunning] = useState(true);
+      const [speedMult, setSpeedMult] = useState(1);
+      const [toasts, setToasts] = useState([]);
+
+      // AI Telemetry
+      const [briefing, setBriefing] = useState("");
+      const [briefingLoading, setBriefingLoading] = useState(false);
+      const [chatMessages, setChatMessages] = useState([]);
+      const [chatInput, setChatInput] = useState("");
+      const [chatLoading, setChatLoading] = useState(false);
+
+      const shuttlesRef = useRef(shuttles);
+      const surgeRef = useRef(surge);
+      const isRainRef = useRef(isRain);
+      const isEmergencyRef = useRef(isEmergency);
+
+      useEffect(() => { shuttlesRef.current = shuttles; }, [shuttles]);
+      useEffect(() => { surgeRef.current = surge; }, [surge]);
+      useEffect(() => { isRainRef.current = isRain; }, [isRain]);
+      useEffect(() => { isEmergencyRef.current = isEmergency; }, [isEmergency]);
+
+      // Toast feedback stack
+      const pushToast = useCallback((text, kind = "info") => {
+        const id = `${Date.now()}-${Math.random()}`;
+        setToasts((t) => [...t.slice(-3), { id, text, kind }]);
+        setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4200);
+      }, []);
+
+      // One simulated physics step for all zones (shared by tick, skip & reset)
+      function advanceZones(prev, scriptedStep) {
+        return prev.map((z) => {
+          const noise = (Math.random() - 0.5) * 3.5;
+          let scripted = 0;
+          if (scriptedStep != null && SURGE_SCRIPT[z.id] && scriptedStep < SURGE_SCRIPT[z.id].length) {
+            scripted = SURGE_SCRIPT[z.id][scriptedStep];
+          }
+
+          let shuttleEffect = 0;
+          if (z.type === "transit") {
+            const base = city.shuttleBaseline[z.id] || 8;
+            shuttleEffect = ((shuttlesRef.current[z.id] || base) - base) * 1.4;
+          }
+
+          let weatherEffect = isRainRef.current ? 4.5 : 0;
+          let emergencyEffect = (isEmergencyRef.current && z.type === "transit") ? -6.0 : 0;
+          const reversion = (z.baseline - z.value) * 0.08;
+
+          const nextVal = clamp(z.value + noise + scripted - shuttleEffect + weatherEffect + emergencyEffect + reversion, 5, 98);
+          const history = [...z.history, { t: z.history[z.history.length - 1].t + 1, v: nextVal }].slice(-14);
+
+          const recent = history.slice(-4);
+          const slope = recent.length >= 2 ? (recent[recent.length - 1].v - recent[0].v) / (recent.length - 1) : 0;
+          const forecast = clamp(nextVal + slope * 3, 0, 100);
+
+          const maxSpeed = city.speedUnit === "mph" ? 45.0 : 65.0;
+          let speed = maxSpeed * Math.exp(-0.04 * (nextVal / 10.0));
+          if (isRainRef.current) speed *= 0.68;
+          if (isEmergencyRef.current) speed = Math.max(speed, maxSpeed * 0.75);
+
+          return {
+            ...z,
+            value: nextVal,
+            history,
+            forecast,
+            speed: Math.max(4, Math.round(speed)),
+            flow: Math.round(nextVal * speed * 0.9)
+          };
+        });
+      }
+
+      // Sound toggle
+      const toggleSound = () => {
+        audio.enabled = !soundActive;
+        setSoundActive(!soundActive);
+        if (!soundActive) audio.playBlip(700);
+      };
+
+      // Simulation transport controls (CrowdFlow reference)
+      function handleSkip() {
+        audio.playBlip(500);
+        setClock((c) => c + 30);
+        setZones((prev) => advanceZones(prev, null));
+        pushToast(`⏩ +30 min fast-forward — inflow building at ${city.venueName}.`, "info");
+      }
+
+      function handleReset() {
+        audio.playBlip(380);
+        setZones(initCityZones(selectedCityKey));
+        setShuttles(city.shuttleBaseline);
+        setClock(0);
+        setSurge({ active: false, step: 0 });
+        setActionLog([]);
+        pushToast("↺ Simulation reset — telemetry re-seeded to baseline.", "good");
+      }
+
+      function triggerShock(kind) {
+        audio.playSurge();
+        const bumps = {
+          letout: { venue: 20, transitHub: 12, transitE: 8, hotelN: 7, corridor: 14 },
+          metro: { transitHub: 16, transitE: 9, corridor: 10, venue: -4 },
+          checkin: { hotelN: 15, hotelS: 12, transitHub: 6 }
+        };
+        const b = bumps[kind];
+        setZones((prev) => prev.map((z) => (b[z.id] ? { ...z, value: clamp(z.value + b[z.id], 5, 98) } : z)));
+        const msgs = {
+          letout: "🎤 The concert just ended — 25,000 people are heading for transit and hotels.",
+          metro: "🚇 Metro disruption — trains are running at half capacity and the station is filling up.",
+          checkin: "🏨 Big check-in rush — hotel districts are filling up fast."
+        };
+        const msg = msgs[kind];
+        pushToast(msg, "warn");
+        setActionLog((l) => [...l.slice(-49), `T+${clock}m — ${msg}`]);
+      }
+
+      // City Switcher
+      function handleSelectCity(key) {
+        audio.playBlip(800);
+        setSelectedCityKey(key);
+        const newCity = CITIES_DATA[key];
+        setZones(initCityZones(key));
+        setShuttles(newCity.shuttleBaseline);
+        setSelectedId("venue");
+        setBriefing("");
+        setChatMessages([]);
+        setActionLog((l) => [...l, `T+${clock}m — Repositioned jurisdiction to ${newCity.name}`]);
+        pushToast(`📍 Now viewing ${newCity.name} (${newCity.venueName}).`, "info");
+      }      // Simulation loop
+      useEffect(() => {
+        if (!running) return;
+        const interval = setInterval(() => {
+          setZones((prev) => advanceZones(prev, surgeRef.current.active ? surgeRef.current.step : null));
+          setClock((c) => c + 5);
+          setSurge((s) => (s.active ? (s.step + 1 >= 6 ? { active: false, step: 0 } : { ...s, step: s.step + 1 }) : s));
+        }, 3200 / speedMult);
+
+        return () => clearInterval(interval);
+      }, [selectedCityKey, city, running, speedMult]);
+
+      // Alerts
+      const alerts = useMemo(() => {
+        const list = [];
+        zones.forEach((z) => {
+          const status = statusOf(z.value);
+          if (status === "critical") {
+            list.push({ level: "critical", text: `${z.name} is ${z.value.toFixed(0)}% full — very crowded right now.` });
+          } else if (status === "warning") {
+            list.push({ level: "warning", text: `${z.name} is getting busy (${z.value.toFixed(0)}% full). Traffic there has slowed to ${z.speed} ${city.speedUnit}.` });
+          } else if (z.forecast >= 80 && z.value < 75) {
+            list.push({ level: "warning", text: `${z.name} could reach ${z.forecast.toFixed(0)}% within 15 minutes — worth watching.` });
+          }
+        });
+        return list.sort((a, b) => (a.level === "critical" ? -1 : 1));
+      }, [zones, city]);
+
+      const recs = useMemo(() => {
+        const hotelZones = zones.filter((z) => z.type === "hotel").sort((a, b) => b.value - a.value);
+        const transitZones = zones.filter((z) => z.type === "transit").sort((a, b) => b.value - a.value);
+        let hotel = null, transit = null;
+        if (hotelZones.length >= 2) {
+          const stressed = hotelZones[0], relief = hotelZones[hotelZones.length - 1];
+          if (stressed.value >= 70 && stressed.value - relief.value >= 14) hotel = { stressed, relief };
+        }
+        if (transitZones.length >= 2) {
+          const stressed = transitZones[0], relief = transitZones[transitZones.length - 1];
+          if (stressed.value >= 66 && stressed.value - relief.value >= 10) transit = { stressed, relief };
+        }
+        return { hotel, transit };
+      }, [zones]);
+
+      const rlReward = useMemo(() => {
+        const avgLoad = zones.reduce((a, b) => a + b.value, 0) / zones.length;
+        const variance = zones.reduce((a, b) => a + Math.pow(b.value - avgLoad, 2), 0) / zones.length;
+        const penalty = (avgLoad > 70 ? (avgLoad - 70) * 1.8 : 0) + Math.sqrt(variance) * 0.4;
+        return Math.max(12, Math.round(100 - penalty));
+      }, [zones]);
+
+      function triggerSurge() {
+        audio.playSurge();
+        setSurge({ active: true, step: 0 });
+        setActionLog((l) => [...l, `T+${clock}m — Event-end surge cascade triggered at ${city.venueName}`]);
+        pushToast(`⚡ Ran the "event ends now" scenario for ${city.venueName}.`, "warn");
+      }
+
+      function toggleRain() {
+        audio.playBlip(440);
+        setIsRain((r) => {
+          const next = !r;
+          setActionLog((l) => [...l, `T+${clock}m — Weather state shifted to ${next ? "MONSOON FRICTION" : "CLEAR"}`]);
+          pushToast(next ? "🌧️ Heavy rain — traffic is moving about 30% slower." : "☀️ Weather is clear — everything moving normally.", "info");
+          return next;
+        });
+      }
+
+      function toggleEmergency() {
+        audio.playBlip(320);
+        setIsEmergency((e) => {
+          const next = !e;
+          setActionLog((l) => [...l, `T+${clock}m — Priority ambulance corridor ${next ? "ENGAGED" : "RELEASED"}`]);
+          pushToast(next ? "🚑 Ambulance route engaged — traffic lights cleared for it." : "🚑 Ambulance route released.", "info");
+          return next;
+        });
+      }
+
+      function applySignalExtension() {
+        audio.playBlip(600);
+        setSignalExtended(true);
+        setZones((prev) => prev.map((z) => (z.id === "venue" ? { ...z, value: clamp(z.value - 9, 10, 95) } : z)));
+        setActionLog((l) => [...l, `T+${clock}m — Extended green phase (+25s) to flush ${city.venueName} gates`]);
+        pushToast("🚦 Exit lights kept green longer — the crowd is leaving faster.", "good");
+        setTimeout(() => setSignalExtended(false), 8000);
+      }
+
+      function adjustShuttle(zoneId, delta) {
+        audio.playBlip(550 + delta * 50);
+        setShuttles((prev) => ({ ...prev, [zoneId]: clamp((prev[zoneId] || 8) + delta, 0, 32) }));
+      }
+
+      function applyShuttleShift() {
+        if (!recs.transit) return;
+        audio.playBlip(720);
+        const { stressed, relief } = recs.transit;
+        setShuttles((prev) => ({
+          ...prev,
+          [relief.id]: clamp((prev[relief.id] || 8) - 4, 0, 32),
+          [stressed.id]: clamp((prev[stressed.id] || 8) + 4, 0, 32),
+        }));
+        setActionLog((l) => [...l, `T+${clock}m — Shifted 4 express shuttles: ${relief.name} → ${stressed.name}`]);
+        pushToast(`🚌 Sent 4 extra shuttles to ${stressed.name}.`, "good");
+      }
+
+      function applyHotelRedirect() {
+        if (!recs.hotel) return;
+        audio.playBlip(680);
+        const { stressed, relief } = recs.hotel;
+        setZones((prev) =>
+          prev.map((z) => {
+            if (z.id === stressed.id) return { ...z, baseline: clamp(z.baseline - 7, 20, 95) };
+            if (z.id === relief.id) return { ...z, baseline: clamp(z.baseline + 7, 20, 95) };
+            return z;
+          })
+        );
+        setActionLog((l) => [...l, `T+${clock}m — Rerouted booking flow: ${stressed.name} → ${relief.name}`]);
+        pushToast(`🏨 New guests are being directed to ${relief.name} instead of ${stressed.name}.`, "good");
+      }
+
+      async function onGenerateBriefing() {
+        audio.playBlip(900);
+        setBriefingLoading(true);
+        setTimeout(() => {
+          const stressed = zones.find((z) => z.value >= 70) || zones[0];
+          const text = `Here's what's happening in ${city.name} right now:\n` +
+            `The busiest spot is ${stressed.name} (${stressed.value.toFixed(0)}% full).` +
+            (isRain ? " Rain is slowing traffic by about a third." : "") +
+            (isEmergency ? " An ambulance route is active and traffic lights are cleared for it." : "") +
+            ` Overall city health: ${rlReward}/100.\n\n` +
+            `Suggested next steps:\n` +
+            `• Keep the exit lights green longer so crowds leave the venue faster.\n` +
+            `• Send more shuttles to the busiest station: ${zones.find(z => z.type === "transit" && z.value >= 65)?.name || "the main transit hub"}.\n` +
+            `• Redirect new guests to a less full hotel, e.g. ${zones.find(z => z.type === "hotel" && z.value < 50)?.name || "the South District"}.\n` +
+            `• Spread out departure times to avoid one big rush at the end.`;
+          setBriefing(text);
+          setBriefingLoading(false);
+          pushToast("📋 Your summary is ready.", "info");
+        }, 500);
+      }
+
+      function sendChat(text) {
+        audio.playBlip(650);
+        setChatMessages((m) => [...m, { role: "user", text }]);
+        setChatInput("");
+        setChatLoading(true);
+        setTimeout(() => {
+          const q = text.toLowerCase();
+          let reply = "";
+          if (q.includes("stay") || q.includes("hotel")) {
+            const best = [...zones.filter(z => z.type === "hotel")].sort((a,b) => a.value - b.value)[0];
+            reply = `For ${city.name}, we recommend ${best.name} (currently ${best.value.toFixed(0)}% full). It's away from the busiest area and still has rooms available.`;
+          } else if (q.includes("rain") || q.includes("weather")) {
+            reply = isRain
+              ? `It's raining in ${city.name}. Trains and shuttles are running about 12–15 minutes late, and extra buses have been added.`
+              : `The weather in ${city.name} is clear, so everything is moving normally.`;
+          } else if (q.includes("leave") || q.includes("time")) {
+            reply = `The best departure window is within the next 15 minutes. Departing now avoids the peak exodus spike and qualifies for a discounted return fare.`;
+          } else {
+            reply = `Right now the ${city.venueName} area is about ${zones[0].value.toFixed(0)}% full. The fastest way out is the main shuttle line.`;
+          }
+          setChatMessages((m) => [...m, { role: "assistant", text: reply }]);
+          setChatLoading(false);
+        }, 400);
+      }
+
+      const selectedZone = zones.find((z) => z.id === selectedId) || zones[0];
+
+      return (
+        <div className="p-4 sm:p-6 max-w-[1340px] mx-auto min-h-screen">
+          {/* LUSION CINEMATIC HEADER */}
+          <header className="flex flex-wrap items-center justify-between gap-4 mb-6 pb-4 border-b border-[#1c2636]">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-md bg-[#161F2E] border border-[#8B7CF6]/30 flex items-center justify-center text-[#8B7CF6] shadow-[0_0_15px_rgba(139,124,246,0.2)]">
+                <Icon name="orbit" size={22} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xl font-bold tracking-tight text-[#E8EDF4]">Crowd Flow</span>
+                  <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-purple-950/70 border border-purple-500/40 text-purple-300 tracking-wider">
+                    Live Dashboard
+                  </span>
+                </div>
+                <div className="text-xs text-[#7C8AA0] font-mono tracking-wider mt-0.5">
+                  Live crowd updates for {city.name}
+                </div>
+              </div>
+            </div>
+
+            {/* ACTION CONTROLS & HUD */}
+            <div className="flex flex-wrap items-center gap-3">
+              {/* Sound Audio Engine Toggle (Lusion signature) */}
+              <button
+                onClick={toggleSound}
+                className="flex items-center gap-2 px-3 py-1.5 bg-[#121926] border border-[#263042] hover:border-[#8B7CF6] rounded text-xs font-mono transition-all cursor-pointer"
+                title="Turn sound effects on or off"
+              >
+                <div className="flex items-end gap-0.5 h-3.5">
+                  <span className={`w-1 bg-purple-400 rounded-full ${soundActive ? "eq-bar-1" : "h-1"}`}></span>
+                  <span className={`w-1 bg-purple-400 rounded-full ${soundActive ? "eq-bar-2" : "h-2"}`}></span>
+                  <span className={`w-1 bg-purple-400 rounded-full ${soundActive ? "eq-bar-3" : "h-1"}`}></span>
+                </div>
+                <span className="text-[#7C8AA0]">{soundActive ? "Sound On" : "Muted"}</span>
+              </button>
+
+              {/* Back to NammaFlow AI link */}
+              <a
+                href="/"
+                className="text-xs text-sky-400 hover:text-sky-300 border border-sky-500/30 px-3 py-1.5 bg-[#121926] hover:bg-[#161F2E] rounded transition-all font-mono"
+              >
+                ← City Road Network
+              </a>
+
+              {/* Simulation Transport Controls (CrowdFlow reference) */}
+              <button
+                onClick={() => { audio.playBlip(480); setRunning((r) => !r); }}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#121926] border border-[#263042] hover:border-[#8B7CF6] rounded text-xs font-mono transition-all cursor-pointer"
+                title="Play / pause the simulation clock"
+              >
+                {running ? "⏸ Pause" : "▶ Play"}
+              </button>
+              <button
+                onClick={() => { audio.playBlip(520); setSpeedMult((s) => (s >= 4 ? 1 : s * 2)); }}
+                className="text-xs font-mono px-2.5 py-1.5 bg-[#121926] border border-[#263042] hover:border-[#8B7CF6] rounded transition-all cursor-pointer"
+                title="How fast the clock runs"
+              >
+                Speed {speedMult}×
+              </button>
+              <button
+                onClick={handleSkip}
+                className="text-xs font-mono px-2.5 py-1.5 bg-[#121926] border border-[#263042] hover:border-[#8B7CF6] rounded transition-all cursor-pointer"
+                title="Fast-forward 30 simulated minutes"
+              >
+                +30 min
+              </button>
+              <button
+                onClick={handleReset}
+                className="text-xs font-mono px-2.5 py-1.5 bg-[#121926] border border-[#263042] hover:border-red-500/60 rounded transition-all cursor-pointer"
+                title="Start the simulation over"
+              >
+                ↺ Reset
+              </button>
+
+              {/* Jurisdiction Dropdown */}
+              <div className="flex items-center gap-2 bg-[#121926] border border-[#263042] px-3 py-1.5 rounded">
+                <Icon name="globe" size={14} className="text-sky-400" />
+                <span className="text-[10px] text-[#7C8AA0] uppercase font-mono font-semibold">City:</span>
+                <select
+                  value={selectedCityKey}
+                  onChange={(e) => handleSelectCity(e.target.value)}
+                  className="bg-transparent text-xs font-semibold text-[#E8EDF4] outline-none cursor-pointer font-sans"
+                >
+                  {Object.values(CITIES_DATA).map((c) => (
+                    <option key={c.id} value={c.id} className="bg-[#121926] text-[#E8EDF4]">
+                      {c.flag} {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* View Switcher */}
+              <div className="flex border border-[#263042] bg-[#121926] rounded overflow-hidden">
+                <button
+                  onClick={() => { audio.playBlip(500); setView("organizer"); }}
+                  className={`px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
+                    view === "organizer" ? "bg-[#1f2c42] text-[#E8EDF4]" : "text-[#7C8AA0] hover:text-[#E8EDF4]"
+                  }`}
+                >
+                  Organizer View
+                </button>
+                <button
+                  onClick={() => { audio.playBlip(550); setView("attendee"); }}
+                  className={`px-3 py-1.5 text-xs font-medium border-l border-[#263042] transition-colors cursor-pointer ${
+                    view === "attendee" ? "bg-[#1f2c42] text-[#E8EDF4]" : "text-[#7C8AA0] hover:text-[#E8EDF4]"
+                  }`}
+                >
+                  Visitor View
+                </button>
+              </div>
+
+              <div className="text-xs font-mono text-[#7C8AA0] bg-[#121926] border border-[#263042] px-2.5 py-1.5 rounded" title="Simulated clock">
+                {fmtMin(960 + clock)}
+              </div>
+            </div>
+          </header>
+
+          {/* ACTIVE EVENT HUD STRIP */}
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3 p-3 bg-[#121926]/80 backdrop-blur-md border border-white/5 rounded text-xs">
+            <div className="flex items-center gap-2.5">
+              <span className="text-base">{city.flag}</span>
+              <span className="font-semibold text-[#E8EDF4]">{city.venueName}:</span>
+              <span className="text-[#7C8AA0]">{city.eventName}</span>
+            </div>
+            <div className="flex items-center gap-3 font-mono text-[11px]">
+              <span className="text-[#7C8AA0]">Status:</span>
+              <span className="text-emerald-400 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 beacon-pulse"></span> Live — updating every few seconds
+              </span>
+            </div>
+          </div>
+
+          {/* VIEW RENDERER */}
+          {view === "organizer" ? (
+            <div className="grid grid-cols-1 lg:grid-cols-[1.25fr_1fr] gap-4">
+              {/* LEFT COLUMN */}
+              <div className="space-y-4">
+                {/* METRICS HUD CARDS */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  <SpotlightCard className="p-3.5">
+                    <div className="text-[10px] text-[#7C8AA0] font-mono uppercase font-semibold flex items-center gap-1.5">
+                      <Icon name="gauge" size={13} className="text-emerald-400" /> Average Speed
+                    </div>
+                    <div className="text-2xl font-bold font-mono text-[#E8EDF4] mt-1.5">
+                      {Math.round(zones.reduce((a,b) => a + b.speed, 0)/zones.length)} <span className="text-xs text-[#7C8AA0]">{city.speedUnit}</span>
+                    </div>
+                    <div className="text-[10px] text-[#7C8AA0] mt-0.5">across all zones</div>
+                  </SpotlightCard>
+                  <SpotlightCard className="p-3.5">
+                    <div className="text-[10px] text-[#7C8AA0] font-mono uppercase font-semibold flex items-center gap-1.5">
+                      <Icon name="car" size={13} className="text-sky-400" /> People on the Move
+                    </div>
+                    <div className="text-2xl font-bold font-mono text-[#E8EDF4] mt-1.5">
+                      {zones.reduce((a,b) => a + b.flow, 0).toLocaleString()} <span className="text-xs text-[#7C8AA0]">people</span>
+                    </div>
+                    <div className="text-[10px] text-[#7C8AA0] mt-0.5">estimated right now</div>
+                  </SpotlightCard>
+                  <SpotlightCard className="p-3.5">
+                    <div className="text-[10px] text-[#7C8AA0] font-mono uppercase font-semibold flex items-center gap-1.5">
+                      <Icon name="alert" size={13} className="text-amber-400" /> Crowded Zones
+                    </div>
+                    <div className="text-2xl font-bold font-mono text-[#E8EDF4] mt-1.5">
+                      {zones.filter(z => z.value >= 70).length} <span className="text-xs text-[#7C8AA0]">busy</span>
+                    </div>
+                    <div className="text-[10px] text-[#7C8AA0] mt-0.5">zones over 70% full</div>
+                  </SpotlightCard>
+                  <SpotlightCard className="p-3.5">
+                    <div className="text-[10px] text-[#7C8AA0] font-mono uppercase font-semibold flex items-center gap-1.5">
+                      <Icon name="activity" size={13} className="text-emerald-400" /> City Health
+                    </div>
+                    <div className="text-2xl font-bold font-mono text-emerald-300 mt-1.5">
+                      {rlReward} <span className="text-xs text-[#7C8AA0]">/100</span>
+                    </div>
+                    <div className="text-[10px] text-[#7C8AA0] mt-0.5">higher = calmer city</div>
+                  </SpotlightCard>
+                </div>
+
+                {/* ZONES GRID WITH CURSOR SPOTLIGHT */}
+                <SpotlightCard className="p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                    <div className="text-[11px] font-mono tracking-wider text-[#7C8AA0] uppercase font-semibold">
+                      Zones We're Watching ({zones.length})
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={toggleRain}
+                        className={`flex items-center gap-1 text-[11px] px-2.5 py-1 rounded border transition-all cursor-pointer font-mono ${
+                          isRain ? "bg-sky-950/80 border-sky-400 text-sky-300" : "border-[#263042] text-[#7C8AA0] hover:text-[#E8EDF4]"
+                        }`}
+                      >
+                        <Icon name="cloud-rain" size={12} /> {isRain ? "Rain Active" : "Simulate Rain"}
+                      </button>
+                      <button
+                        onClick={toggleEmergency}
+                        className={`flex items-center gap-1 text-[11px] px-2.5 py-1 rounded border transition-all cursor-pointer font-mono ${
+                          isEmergency ? "bg-red-950/80 border-red-500 text-red-300 animate-pulse" : "border-[#263042] text-[#7C8AA0] hover:text-[#E8EDF4]"
+                        }`}
+                      >                          <Icon name="siren" size={12} /> {isEmergency ? "Ambulance Route Active" : "Ambulance Priority"}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                    {zones.map((z) => {
+                      const st = statusOf(z.value);
+                      const col = COLORS[st];
+                      const isSel = z.id === selectedId;
+                      return (
+                        <div
+                          key={z.id}
+                          onClick={() => { audio.playBlip(620); setSelectedId(z.id); }}
+                          className={`p-3 rounded border transition-all cursor-pointer ${
+                            isSel ? "bg-[#182236] border-[#8B7CF6] shadow-[0_0_15px_rgba(139,124,246,0.2)]" : "bg-[#101726]/80 border-[#263042] hover:border-[#3b485d]"
+                          }`}
+                          style={{ boxShadow: `inset 3px 0 0 0 ${col}` }}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-[12px] font-medium text-[#E8EDF4] truncate max-w-[110px]">{z.name}</span>
+                            <KineticSparkline history={z.history} color={col} />
+                          </div>
+                          <div className="flex items-baseline gap-1 mt-2">
+                            <span className="text-2xl font-bold font-mono text-[#E8EDF4]">{z.value.toFixed(0)}</span>
+                            <span className="text-xs text-[#7C8AA0]">%</span>
+                            <span className="text-[10px] font-semibold font-mono" style={{ color: col }}>{statusWord(z.value)}</span>
+                          </div>
+                          <div className="flex items-center justify-between text-[10px] text-[#7C8AA0] mt-1.5 pt-1.5 border-t border-[#1d2636] font-mono">
+                            <span>{z.capacityLabel}</span>
+                            <span style={{ color: col }}>{z.speed} {city.speedUnit}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </SpotlightCard>
+
+                {/* KINETIC DIGITAL TWIN TOPOLOGY */}
+                <KineticTopologyMap
+                  zones={zones}
+                  selectedId={selectedId}
+                  onSelectZone={setSelectedId}
+                  isRain={isRain}
+                  isEmergency={isEmergency}
+                  surgeActive={surge.active}
+                />
+              </div>
+
+              {/* RIGHT COLUMN */}
+              <div className="space-y-4">
+                {/* SURGE DISPATCH CONTROL */}
+                <SpotlightCard className="p-4" accent={COLORS.warning}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-[#E8EDF4] flex items-center gap-1.5">
+                        <Icon name="zap" size={15} className="text-amber-400" /> What If the Event Ends Now?
+                      </div>
+                      <div className="text-[11px] text-[#7C8AA0] mt-0.5">
+                        Simulates everyone leaving {city.venueName} at once — see which zones fill up.
+                      </div>
+                    </div>
+                    <button
+                      onClick={triggerSurge}
+                      disabled={surge.active}
+                      className="text-[11px] font-mono font-semibold px-3 py-1.5 border border-[#FF5C6C]/60 text-[#FF5C6C] hover:bg-[#FF5C6C]/10 rounded disabled:opacity-40 cursor-pointer transition-all"
+                    >
+                      {surge.active ? "Running…" : "Run It"}
+                    </button>
+                  </div>
+                </SpotlightCard>
+
+                {/* SCRIPTED SHOCK EVENTS (CrowdFlow reference) */}
+                <SpotlightCard className="p-4" accent={COLORS.critical}>
+                  <div className="text-[11px] font-mono tracking-wider text-[#7C8AA0] uppercase font-semibold mb-2">
+                    Try a Scenario
+                  </div>
+                  <div className="space-y-2">
+                    <button onClick={() => triggerShock("letout")} className="w-full text-left p-2.5 bg-[#161F2E]/80 rounded border border-[#263042] hover:border-[#F5A623]/60 hover:bg-[#F5A623]/5 transition-all cursor-pointer">
+                      <div className="text-[12px] font-medium text-[#E8EDF4]">🎤 The Concert Ends</div>
+                      <div className="text-[10px] text-[#7C8AA0] mt-0.5">25,000 people leave at once → transit and hotels fill up</div>
+                    </button>
+                    <button onClick={() => triggerShock("metro")} className="w-full text-left p-2.5 bg-[#161F2E]/80 rounded border border-[#263042] hover:border-[#F5A623]/60 hover:bg-[#F5A623]/5 transition-all cursor-pointer">
+                      <div className="text-[12px] font-medium text-[#E8EDF4]">🚇 Metro Breaks Down</div>
+                      <div className="text-[10px] text-[#7C8AA0] mt-0.5">Trains run at half capacity → the station fills up</div>
+                    </button>
+                    <button onClick={() => triggerShock("checkin")} className="w-full text-left p-2.5 bg-[#161F2E]/80 rounded border border-[#263042] hover:border-[#F5A623]/60 hover:bg-[#F5A623]/5 transition-all cursor-pointer">
+                      <div className="text-[12px] font-medium text-[#E8EDF4]">🏨 Hotel Check-In Rush</div>
+                      <div className="text-[10px] text-[#7C8AA0] mt-0.5">A big conference arrives → hotels fill up fast</div>
+                    </button>
+                  </div>
+                </SpotlightCard>
+
+                {/* ALERTS */}
+                <SpotlightCard className="p-4">
+                  <div className="text-[11px] font-mono tracking-wider text-[#7C8AA0] uppercase font-semibold mb-2">
+                    Live Alerts ({alerts.length})
+                  </div>
+                  <div className="space-y-2 max-h-[140px] overflow-y-auto pr-1">
+                    {alerts.map((a, i) => (
+                      <div key={i} className="flex items-start gap-2 p-2 bg-[#161F2E]/90 rounded border border-[#263042]" style={{ boxShadow: `inset 3px 0 0 0 ${COLORS[a.level]}` }}>
+                        <Icon name="alert" size={13} className="mt-0.5 flex-shrink-0 text-amber-400" />
+                        <div className="text-[12px] text-[#E8EDF4] leading-snug">{a.text}</div>
+                      </div>
+                    ))}
+                  </div>
+                </SpotlightCard>
+
+                {/* SMART MITIGATIONS */}
+                <SpotlightCard className="p-4">
+                  <div className="text-[11px] font-mono tracking-wider text-[#7C8AA0] uppercase font-semibold mb-2">
+                    Recommended Actions
+                  </div>
+                  <div className="space-y-2.5">
+                    <div className="p-2.5 bg-[#161F2E]/80 rounded border border-[#263042] flex items-center justify-between">
+                      <div>
+                        <div className="text-[12px] font-medium text-[#E8EDF4]">Keep Exit Lights Green Longer</div>
+                        <div className="text-[10px] text-[#7C8AA0]">Lets more people leave the venue before traffic builds up.</div>
+                      </div>
+                      <button
+                        onClick={applySignalExtension}
+                        className={`text-[11px] px-2.5 py-1 rounded border transition-all cursor-pointer font-mono ${
+                          signalExtended ? "bg-emerald-950/70 border-emerald-500 text-emerald-300" : "border-[#4FD8E0]/40 text-[#4FD8E0] hover:bg-[#4FD8E0]/10"
+                        }`}
+                      >
+                        {signalExtended ? "Applied ✓" : "Apply"}
+                      </button>
+                    </div>
+
+                    {recs.hotel && (
+                      <div className="p-2.5 bg-[#161F2E]/80 rounded border border-[#263042] flex items-center justify-between">
+                        <div>
+                          <div className="text-[12px] font-medium text-[#E8EDF4]">Send Guests to a Quieter Hotel</div>
+                          <div className="text-[10px] text-[#7C8AA0]">Guide new bookings from {recs.hotel.stressed.name} ({recs.hotel.stressed.value.toFixed(0)}% full) to {recs.hotel.relief.name}.</div>
+                        </div>
+                        <button onClick={applyHotelRedirect} className="text-[11px] px-2.5 py-1 rounded border border-[#4FD8E0]/40 text-[#4FD8E0] hover:bg-[#4FD8E0]/10 cursor-pointer font-mono">
+                          Redirect
+                        </button>
+                      </div>
+                    )}
+
+                    {recs.transit && (
+                      <div className="p-2.5 bg-[#161F2E]/80 rounded border border-[#263042] flex items-center justify-between">
+                        <div>
+                          <div className="text-[12px] font-medium text-[#E8EDF4]">Send More Shuttles to the Busy Station</div>
+                          <div className="text-[10px] text-[#7C8AA0]">Move 4 extra shuttles to {recs.transit.stressed.name}.</div>
+                        </div>
+                        <button onClick={applyShuttleShift} className="text-[11px] px-2.5 py-1 rounded border border-[#4FD8E0]/40 text-[#4FD8E0] hover:bg-[#4FD8E0]/10 cursor-pointer font-mono">
+                          Send Shuttles
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </SpotlightCard>
+
+                {/* SHUTTLE STEPPERS */}
+                <SpotlightCard className="p-4">
+                  <div className="text-[11px] font-mono tracking-wider text-[#7C8AA0] uppercase font-semibold mb-2">
+                    Shuttle Buses in Use
+                  </div>
+                  <div className="space-y-2">
+                    {zones.filter((z) => z.type === "transit").map((z) => (
+                      <div key={z.id} className="flex items-center justify-between">
+                        <span className="text-xs text-[#E8EDF4] flex items-center gap-1.5">
+                          <Icon name="bus" size={13} className="text-[#7C8AA0]" /> {z.name}
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <button onClick={() => adjustShuttle(z.id, -1)} className="w-6 h-6 rounded flex items-center justify-center border border-[#263042] text-[#7C8AA0] hover:text-[#E8EDF4] cursor-pointer">
+                            <Icon name="minus" size={11} />
+                          </button>
+                          <span className="w-7 text-center font-mono text-sm font-semibold text-[#E8EDF4]">{shuttles[z.id] || 8}</span>
+                          <button onClick={() => adjustShuttle(z.id, 1)} className="w-6 h-6 rounded flex items-center justify-center border border-[#263042] text-[#7C8AA0] hover:text-[#E8EDF4] cursor-pointer">
+                            <Icon name="plus" size={11} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </SpotlightCard>
+
+                {/* AI OPERATIONS BRIEFING (LUSION HUD) */}
+                <SpotlightCard className="p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-[11px] font-mono tracking-wider text-[#7C8AA0] uppercase font-semibold flex items-center gap-1.5">
+                      <Icon name="sparkles" size={13} className="text-purple-400" /> AI Assistant
+                    </div>
+                    <button
+                      onClick={onGenerateBriefing}
+                      disabled={briefingLoading}
+                      className="text-[11px] font-mono px-2.5 py-1 rounded border border-purple-500/50 text-purple-300 hover:bg-purple-950/40 cursor-pointer transition-all"
+                    >
+                      {briefingLoading ? "Thinking…" : "Get a Summary"}
+                    </button>
+                  </div>
+                  {briefing ? (
+                    <div className="text-[12px] text-[#E8EDF4] leading-relaxed whitespace-pre-wrap p-3 bg-[#161F2E]/80 rounded border border-purple-500/30 font-sans">
+                      {briefing}
+                    </div>
+                  ) : (
+                    <div className="text-[11px] text-[#7C8AA0] italic font-sans">
+                      Get a plain-English summary of what's happening right now.
+                    </div>
+                  )}
+                </SpotlightCard>
+              </div>
+            </div>
+          ) : (
+            /* ATTENDEE GUIDE VIEW */
+            <div className="grid grid-cols-1 lg:grid-cols-[1.15fr_1fr] gap-4">
+              <div className="space-y-4">
+                {isRain && (
+                  <div className="p-3 bg-sky-950/70 border border-sky-400/40 rounded flex items-center gap-2.5 text-sky-200 text-xs">
+                    <Icon name="cloud-rain" size={16} className="text-sky-400 flex-shrink-0" />
+                    <div>Heavy rain in {city.name} — trains and shuttles are running about 12 minutes late.</div>
+                  </div>
+                )}
+
+                <SpotlightCard className="p-4">
+                  <div className="text-[11px] font-mono tracking-wider text-[#7C8AA0] uppercase font-semibold mb-2">
+                    Hotels in {city.name}
+                  </div>
+                  <div className="space-y-2.5">
+                    {zones.filter(z => z.type === "hotel").map((h) => (
+                      <div key={h.id} className="p-3 bg-[#161F2E]/80 rounded border border-[#263042] flex items-center justify-between">
+                        <div>
+                          <div className="text-sm font-medium text-[#E8EDF4] flex items-center gap-1.5">
+                            <Icon name="hotel" size={14} className="text-[#7C8AA0]" /> {h.name}
+                          </div>
+                          <div className="text-[11px] text-[#7C8AA0] mt-0.5">{h.capacityLabel} &middot; ~15 min commute</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-lg font-bold font-mono" style={{ color: COLORS[statusOf(h.value)] }}>{h.value.toFixed(0)}%</div>
+                          <div className="text-[10px] text-[#7C8AA0]">Occupancy</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </SpotlightCard>
+
+                <SpotlightCard className="p-4">
+                  <div className="text-[11px] font-mono tracking-wider text-[#7C8AA0] uppercase font-semibold mb-2">
+                    Trains &amp; Shuttles
+                  </div>
+                  <div className="space-y-3">
+                    {zones.filter(z => z.type === "transit").map((t) => (
+                      <div key={t.id} className="p-3 bg-[#161F2E]/80 rounded border border-[#263042]">
+                        <div className="flex items-center justify-between text-xs font-semibold">
+                          <span className="flex items-center gap-1.5"><Icon name="bus" size={13} className="text-[#7C8AA0]" /> {t.name}</span>
+                          <span className="font-mono text-[11px]" style={{ color: COLORS[statusOf(t.value)] }}>
+                            {t.value >= 80 ? "Crowded" : t.value >= 65 ? "Busy" : "Quiet"}
+                          </span>
+                        </div>
+                        <div className="h-1.5 bg-[#05080E] mt-2 rounded-full overflow-hidden">
+                          <div className="h-full transition-all duration-500" style={{ width: `${t.value}%`, background: COLORS[statusOf(t.value)] }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </SpotlightCard>
+              </div>
+
+              {/* CONCIERGE CHAT */}
+              <SpotlightCard className="p-4 flex flex-col h-[540px]">
+                <div className="text-[11px] font-mono tracking-wider text-[#7C8AA0] uppercase font-semibold mb-2 flex items-center justify-between">
+                  <span>Ask About {city.name}</span>
+                  <span className="text-purple-400 font-mono text-[10px]">CONNECTED</span>
+                </div>
+                <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
+                  {chatMessages.length === 0 && (
+                    <div className="text-[12px] text-[#7C8AA0] p-3 bg-[#161F2E]/60 border border-[#263042] rounded">
+                      Ask about hotel recommendations, transit lines, or optimal departure windows in {city.name}.
+                    </div>
+                  )}
+                  {chatMessages.map((m, i) => (
+                    <div key={i} className={`text-[12px] p-2.5 rounded max-w-[90%] ${m.role === "user" ? "ml-auto bg-[#1b2534] border border-[#263042]" : "bg-[#161F2E] border border-purple-500/30"}`}>
+                      {m.text}
+                    </div>
+                  ))}
+                  {chatLoading && <div className="text-[11px] text-purple-400 font-mono animate-pulse">Thinking…</div>}
+                </div>
+                <form onSubmit={(e) => { e.preventDefault(); if (chatInput.trim()) sendChat(chatInput.trim()); }} className="flex items-center gap-2 mt-3">
+                  <input
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    placeholder={`Ask about ${city.name} travel…`}
+                    className="flex-1 bg-[#05080E] border border-[#263042] px-3 py-2 rounded text-[12px] text-[#E8EDF4] outline-none focus:border-purple-500"
+                  />
+                  <button type="submit" className="w-8 h-8 rounded flex items-center justify-center border border-purple-500/50 text-purple-400 hover:bg-purple-950/30 cursor-pointer">
+                    <Icon name="send" size={13} />
+                  </button>
+                </form>
+              </SpotlightCard>
+            </div>
+          )}
+
+          {/* EVENT TIMELINE FOOTER (CrowdFlow reference) */}
+          <div className="mt-5 p-4 bg-[#121926]/70 backdrop-blur-md border border-white/5 rounded-lg">
+            <div className="flex items-center gap-3">
+              <span className="text-[11px] font-mono text-[#7C8AA0] w-11 flex-shrink-0">{fmtMin(960)}</span>
+              <div className="relative flex-1 h-1.5 rounded bg-gradient-to-r from-emerald-500 via-amber-400 to-red-500">
+                <div
+                  className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-white border-2 border-cyan-400 shadow-[0_0_12px_rgba(34,211,238,0.9)] transition-all duration-700"
+                  style={{ left: `${clamp((clock / 360) * 100, 0, 100)}%` }}
+                />
+                <div className="absolute top-0 bottom-0 w-0.5 bg-white/60" style={{ left: "33.3%" }} title="Event window 18:00 – 21:30" />
+              </div>
+              <span className="text-[11px] font-mono text-[#7C8AA0] w-11 flex-shrink-0 text-right">{fmtMin(1320)}</span>
+            </div>
+            <div className="flex flex-wrap gap-x-6 gap-y-2 mt-3 text-[11px] text-[#7C8AA0]">
+              <div className="flex flex-col gap-0.5"><b className="text-[13px] text-[#E8EDF4] font-mono">{fmtMin(960 + clock)}</b><span>simulated time</span></div>
+              <div className="flex flex-col gap-0.5"><b className="text-[13px] text-[#E8EDF4] font-mono">{zones.reduce((a, b) => a + b.flow, 0).toLocaleString()}</b><span>people in motion</span></div>
+              <div className="flex flex-col gap-0.5"><b className="text-[13px] text-amber-400 font-mono">{alerts.length}</b><span>active alerts</span></div>
+              <div className="flex flex-col gap-0.5"><b className="text-[13px] text-emerald-400 font-mono">{actionLog.length}</b><span>actions taken</span></div>
+              <div className="flex flex-col gap-0.5 lg:ml-auto">
+                <b className="text-[13px] text-[#E8EDF4]">🎵 {city.eventName}</b>
+                <span className="font-mono">{fmtMin(1080)} – {fmtMin(1290)} · {city.venueName}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* TOAST STACK */}
+          <div className="fixed top-16 right-4 z-50 flex flex-col gap-2 max-w-[330px]">
+            {toasts.map((t) => (
+              <div
+                key={t.id}
+                className={`toast px-3.5 py-2.5 text-xs leading-relaxed rounded shadow-[0_12px_34px_rgba(0,0,0,0.5)] bg-[#121b38] border border-[#8B7CF6]/40 border-l-4 ${
+                  t.kind === "good" ? "border-l-emerald-400" : t.kind === "warn" ? "border-l-amber-400" : "border-l-purple-400"
+                }`}
+              >
+                {t.text}
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ==========================================
+    // 🌌 FULLSCREEN LUSION KINETIC PARTICLES
+    // ==========================================
+    function initLusionBackground() {
+      const canvas = document.getElementById("lusion-canvas");
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      let w = (canvas.width = window.innerWidth);
+      let h = (canvas.height = window.innerHeight);
+
+      window.addEventListener("resize", () => {
+        w = canvas.width = window.innerWidth;
+        h = canvas.height = window.innerHeight;
+      });
+
+      const mouse = { x: -1000, y: -1000, radius: 140 };
+      window.addEventListener("mousemove", (e) => {
+        mouse.x = e.clientX;
+        mouse.y = e.clientY;
+      });
+      window.addEventListener("mouseleave", () => {
+        mouse.x = -1000;
+        mouse.y = -1000;
+      });
+
+      const count = Math.min(85, Math.floor((w * h) / 16000));
+      const particles = [];
+      for (let i = 0; i < count; i++) {
+        particles.push({
+          x: Math.random() * w,
+          y: Math.random() * h,
+          vx: (Math.random() - 0.5) * 0.45,
+          vy: (Math.random() - 0.5) * 0.45,
+          radius: Math.random() * 1.6 + 0.8,
+          alpha: Math.random() * 0.5 + 0.2
+        });
+      }
+
+      function animate() {
+        ctx.clearRect(0, 0, w, h);
+
+        // Draw connections
+        for (let i = 0; i < particles.length; i++) {
+          const p = particles[i];
+          p.x += p.vx;
+          p.y += p.vy;
+
+          if (p.x < 0) p.x = w;
+          if (p.x > w) p.x = 0;
+          if (p.y < 0) p.y = h;
+          if (p.y > h) p.y = 0;
+
+          // Mouse proximity reaction
+          const dx = mouse.x - p.x;
+          const dy = mouse.y - p.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < mouse.radius) {
+            const force = (mouse.radius - dist) / mouse.radius;
+            p.x -= (dx / dist) * force * 1.5;
+            p.y -= (dy / dist) * force * 1.5;
+          }
+
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(139, 124, 246, ${p.alpha * 0.6})`;
+          ctx.fill();
+
+          for (let j = i + 1; j < particles.length; j++) {
+            const p2 = particles[j];
+            const djx = p.x - p2.x;
+            const djy = p.y - p2.y;
+            const d = Math.sqrt(djx * djx + djy * djy);
+            if (d < 110) {
+              ctx.beginPath();
+              ctx.moveTo(p.x, p.y);
+              ctx.lineTo(p2.x, p2.y);
+              ctx.strokeStyle = `rgba(139, 124, 246, ${(1 - d / 110) * 0.12})`;
+              ctx.stroke();
+            }
+          }
+        }
+        requestAnimationFrame(animate);
+      }
+      animate();
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    setTimeout(initLusionBackground, 200);
+  
