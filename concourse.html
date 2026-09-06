@@ -1406,6 +1406,9 @@
               <span className="text-emerald-400 flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 beacon-pulse"></span> Live — updating every few seconds
               </span>
+              <span className="px-2 py-0.5 rounded border font-mono" style={{ color: phaseInfo.color, borderColor: phaseInfo.color + "55", background: phaseInfo.color + "14" }}>
+                {phaseInfo.label}
+              </span>
             </div>
           </div>
 
@@ -1549,6 +1552,34 @@
                   </div>
                 </SpotlightCard>
 
+                {/* EVENT SCHEDULE — time-blocked phases with mid-simulation controls */}
+                <SpotlightCard className="p-4" accent={COLORS.ai}>
+                  <div className="text-[11px] font-mono tracking-wider text-[#7C8AA0] uppercase font-semibold mb-2">
+                    Event Schedule — {city.venueName}
+                  </div>
+                  <div className="space-y-1.5 mb-3">
+                    {schedule.map((p) => {
+                      const active = phaseAt(schedule, clock) === p.id;
+                      const done = clock >= p.end;
+                      return (
+                        <div key={p.id} className={`flex items-center justify-between text-[11px] px-2 py-1 rounded border ${active ? "bg-white/5 border-white/20" : done ? "border-[#1d2636] opacity-45" : "border-[#263042]"}`}>
+                          <span className="flex items-center gap-1.5 font-medium text-[#E8EDF4]">
+                            <span className="w-2 h-2 rounded-full" style={{ background: p.color }}></span>
+                            {p.label}
+                            {active && <span className="text-[9px] font-mono text-cyan-300 border border-cyan-400/40 px-1 rounded">NOW</span>}
+                          </span>
+                          <span className="font-mono text-[#7C8AA0]">{fmtMin(p.start)} – {fmtMin(p.end)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={() => shiftSchedule("delay")} className="flex-1 text-[10.5px] font-mono px-2 py-1.5 rounded border border-[#38BDF8]/50 text-sky-300 hover:bg-sky-950/40 cursor-pointer transition-all" title="Push every phase 30 min later — arrival pressure shifts">⏰ Delay 30m</button>
+                    <button onClick={() => shiftSchedule("extend")} className="flex-1 text-[10.5px] font-mono px-2 py-1.5 rounded border border-[#A78BFA]/50 text-purple-300 hover:bg-purple-950/40 cursor-pointer transition-all" title="Extend the main event 45 min — softens and delays the exit surge">➕ Extend 45m</button>
+                    <button onClick={() => shiftSchedule("endearly")} className="flex-1 text-[10.5px] font-mono px-2 py-1.5 rounded border border-[#FF5C6C]/60 text-[#FF5C6C] hover:bg-red-950/40 cursor-pointer transition-all" title="End the event now — triggers the egress surge immediately">🏁 End Early</button>
+                  </div>
+                </SpotlightCard>
+
                 {/* SCRIPTED SHOCK EVENTS (CrowdFlow reference) */}
                 <SpotlightCard className="p-4" accent={COLORS.critical}>
                   <div className="text-[11px] font-mono tracking-wider text-[#7C8AA0] uppercase font-semibold mb-2">
@@ -1629,6 +1660,18 @@
                         </button>
                       </div>
                     )}
+
+                    {(() => { const vs = venueState(zones.find((z) => z.type === "venue")); return vs && (vs.state === "critical" || vs.state === "atCapacity") ? (
+                      <div className="p-2.5 bg-[#161F2E]/80 rounded border border-[#263042] flex items-center justify-between">
+                        <div>
+                          <div className="text-[12px] font-medium text-[#E8EDF4]">Activate Overflow / Hold Queue</div>
+                          <div className="text-[10px] text-[#7C8AA0]">{overflowActive ? "Arrivals held in queue — venue pressure easing." : `Venue at ${zones.find((z) => z.type === "venue").value.toFixed(0)}% — hold arrivals at Gate B while the crowd clears.`}</div>
+                        </div>
+                        <button onClick={toggleOverflow} className={`text-[11px] px-2.5 py-1 rounded border transition-all cursor-pointer font-mono ${overflowActive ? "bg-red-950/70 border-red-500 text-red-300" : "border-[#F5A623]/50 text-amber-300 hover:bg-amber-950/30"}`}>
+                          {overflowActive ? "Active ✓" : "Activate"}
+                        </button>
+                      </div>
+                    ) : null; })()}
                   </div>
                 </SpotlightCard>
 
@@ -1661,14 +1704,14 @@
                 <SpotlightCard className="p-4">
                   <div className="flex items-center justify-between mb-2">
                     <div className="text-[11px] font-mono tracking-wider text-[#7C8AA0] uppercase font-semibold flex items-center gap-1.5">
-                      <Icon name="sparkles" size={13} className="text-purple-400" /> AI Assistant
+                      <Icon name="sparkles" size={13} className="text-purple-400" /> Ops Summary
                     </div>
                     <button
                       onClick={onGenerateBriefing}
                       disabled={briefingLoading}
                       className="text-[11px] font-mono px-2.5 py-1 rounded border border-purple-500/50 text-purple-300 hover:bg-purple-950/40 cursor-pointer transition-all"
                     >
-                      {briefingLoading ? "Thinking…" : "Get a Summary"}
+                      {briefingLoading ? "Analyzing…" : "Get a Summary"}
                     </button>
                   </div>
                   {briefing ? (
@@ -1677,7 +1720,7 @@
                     </div>
                   ) : (
                     <div className="text-[11px] text-[#7C8AA0] italic font-sans">
-                      Get a plain-English summary of what's happening right now.
+                      Rule-based summary compiled locally from live telemetry — no external AI service is called.
                     </div>
                   )}
                 </SpotlightCard>
@@ -1693,6 +1736,14 @@
                     <div>Heavy rain in {city.name} — trains and shuttles are running about 12 minutes late.</div>
                   </div>
                 )}
+
+                {/* VENUE AT-CAPACITY BANNER — attendee-side admission control effect */}
+                {(() => { const vs = venueState(zones.find((z) => z.type === "venue")); return vs && vs.state === "atCapacity" ? (
+                  <div className="p-3 bg-red-950/70 border border-red-500/50 rounded flex items-center gap-2.5 text-red-200 text-xs animate-pulse">
+                    <Icon name="alert" size={16} className="text-red-400 flex-shrink-0" />
+                    <div><b>{city.venueName} — entry closed</b> (about {vs.wait} min wait). Overflow holding area open near Gate B; concert entry resumes as the queue clears.</div>
+                  </div>
+                ) : null; })()}
 
                 {/* CROWDFLOW GUIDE — RECOMMENDED ALTERNATIVES */}
                 <SpotlightCard className="p-4">
@@ -1724,7 +1775,9 @@
                                 </span>
                               </div>
                               <div className="text-[11px] text-[#7C8AA0] mb-2 leading-snug">
-                                {sc === "critical" ? (
+                                {z.type === "venue" && venueState(z).state === "atCapacity" ? (
+                                  <>🚧 <b style={{ color: "#FF5C6C" }}>Entry closed</b> at {z.name} — about <b style={{ color: "#F5A623" }}>{venueState(z).wait} min wait</b>. Overflow holding area open near Gate B; re-check in 10 minutes.</>
+                                ) : sc === "critical" ? (
                                   <>⚠️ {z.name} is <b style={{ color: "#FF5C6C" }}>very crowded</b> right now ({Math.round(z.value)}% full) and projected to keep rising — consider the alternatives below.</>
                                 ) : (
                                   <>{z.name} is getting busy at <b style={{ color: "#F5A623" }}>{Math.round(z.value)}%</b> full. Cheaper nearby options, ranked:</>
@@ -1739,7 +1792,7 @@
                                       <span className="w-5 h-5 rounded flex items-center justify-center bg-white/10 text-[10px] font-bold text-cyan-300 flex-shrink-0">{i + 1}</span>
                                       <div className="flex-1 text-[11.5px] text-[#E8EDF4] leading-snug min-w-0">
                                         Head to <b className="text-emerald-300">{a.zone.name}</b> — only {a.zone.value.toFixed(0)}% full, <b className="text-emerald-300">{a.sparePct}%</b> capacity free.{" "}
-                                        <span className="text-[#7C8AA0]">{a.mode} · ~{a.eta} min · {a.dist} km</span>
+                                        <span className="text-[#7C8AA0]">{a.mode} ~{a.eta} min · + {a.lastMile} to the gate · {a.dist} km</span>
                                       </div>
                                       <button onClick={() => showTheWay(z, a)} className="text-[10.5px] px-2.5 py-1 rounded border border-emerald-400/50 text-emerald-300 hover:bg-emerald-400/10 cursor-pointer whitespace-nowrap flex-shrink-0">
                                         🧭 Show me the way
@@ -1753,6 +1806,36 @@
                         })}
                       </div>
                     );
+                  })()}
+                </SpotlightCard>
+
+                {/* LIVE INCENTIVES — computed in real time from zone load gaps */}
+                <SpotlightCard className="p-4">
+                  <div className="text-[11px] font-mono tracking-wider text-[#7C8AA0] uppercase font-semibold mb-2 flex items-center gap-1.5">
+                    <Icon name="zap" size={13} className="text-emerald-400" /> Live Incentives
+                  </div>
+                  {(() => {
+                    const rows = [];
+                    if (incentives.hotel) rows.push(
+                      <div key="hotel" className="p-2.5 bg-gradient-to-r from-emerald-950/60 to-[#161F2E]/80 rounded border border-emerald-500/30 flex items-start gap-2">
+                        <span className="text-lg leading-none mt-0.5">💸</span>
+                        <div className="flex-1">
+                          <div className="text-[12px] font-semibold text-emerald-300">Save {incentives.hotel.discount}% — book {incentives.hotel.relief.name} now</div>
+                          <div className="text-[10px] text-[#7C8AA0] mt-0.5">vs {incentives.hotel.stressed.name} at {incentives.hotel.stressed.value.toFixed(0)}% full · {Math.round(92 - incentives.hotel.relief.value)}% capacity free. Offer recalculates live as zones change.</div>
+                        </div>
+                      </div>
+                    );
+                    if (incentives.offPeak) rows.push(
+                      <div key="offpeak" className="p-2.5 bg-gradient-to-r from-sky-950/60 to-[#161F2E]/80 rounded border border-sky-500/30 flex items-start gap-2">
+                        <span className="text-lg leading-none mt-0.5">🚉</span>
+                        <div className="flex-1">
+                          <div className="text-[12px] font-semibold text-sky-300">Leave now — skip ~{incentives.offPeak.deltaMin} min of peak crowds</div>
+                          <div className="text-[10px] text-[#7C8AA0] mt-0.5">Peak exodus builds at {incentives.offPeak.peakZone.name} after {fmtMin(schedule[schedule.length - 1].start)}. Departing before then earns the off-peak return fare.</div>
+                        </div>
+                      </div>
+                    );
+                    if (rows.length === 0) return <div className="text-[11px] text-[#7C8AA0] italic">Demand is balanced right now — incentive offers appear when a hotel or station gets overloaded.</div>;
+                    return <div className="space-y-2">{rows}</div>;
                   })()}
                 </SpotlightCard>
 
@@ -1804,7 +1887,7 @@
               <SpotlightCard className="p-4 flex flex-col h-[540px]">
                 <div className="text-[11px] font-mono tracking-wider text-[#7C8AA0] uppercase font-semibold mb-2 flex items-center justify-between">
                   <span>Ask About {city.name}</span>
-                  <span className="text-purple-400 font-mono text-[10px]">CONNECTED</span>
+                  <span className="text-[#7C8AA0] font-mono text-[10px]" title="Rule-based guidance compiled locally from live zone data — no external AI service is called.">LOCAL ENGINE</span>
                 </div>
                 <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
                   {chatMessages.length === 0 && (
@@ -1817,7 +1900,7 @@
                       {m.text}
                     </div>
                   ))}
-                  {chatLoading && <div className="text-[11px] text-purple-400 font-mono animate-pulse">Thinking…</div>}
+                  {chatLoading && <div className="text-[11px] text-purple-400 font-mono animate-pulse">Analyzing…</div>}
                 </div>
                 <form onSubmit={(e) => { e.preventDefault(); if (chatInput.trim()) sendChat(chatInput.trim()); }} className="flex items-center gap-2 mt-3">
                   <input
