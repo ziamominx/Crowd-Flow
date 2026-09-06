@@ -980,17 +980,30 @@
         return () => clearInterval(interval);
       }, [selectedCityKey, city, running, speedMult]);
 
-      // Alerts
+      // Alerts — venue capacity, last-mile queues, plus generic zone pressure
       const alerts = useMemo(() => {
         const list = [];
         zones.forEach((z) => {
           const status = statusOf(z.value);
           if (status === "critical") {
-            list.push({ level: "critical", id: z.id, text: `${z.name} is ${z.value.toFixed(0)}% full — very crowded right now.` });
+            if (z.type === "venue") {
+              const vs = venueState(z);
+              if (vs.state === "atCapacity") {
+                list.push({ level: "critical", id: "venue:cap", text: `🚧 ${z.name} is AT CAPACITY — entry paused (~${vs.wait} min wait). Activate overflow control or hold the queue.` });
+              } else {
+                list.push({ level: "critical", id: "venue:crit", text: `${z.name} is near capacity (${z.value.toFixed(0)}% full) — admission should be throttled now.` });
+              }
+            } else {
+              list.push({ level: "critical", id: z.id, text: `${z.name} is ${z.value.toFixed(0)}% full — very crowded right now.` });
+            }
           } else if (status === "warning") {
             list.push({ level: "warning", id: z.id, text: `${z.name} is getting busy (${z.value.toFixed(0)}% full). Traffic there has slowed to ${z.speed} ${city.speedUnit}.` });
           } else if (z.forecast >= 80 && z.value < 75) {
             list.push({ level: "warning", id: z.id, text: `${z.name} could reach ${z.forecast.toFixed(0)}% within 15 minutes — worth watching.` });
+          }
+          // Last-mile failure mode: station → gate shuttle queue is full
+          if (z.type === "transit" && z.value >= 85) {
+            list.push({ level: "warning", id: `${z.id}:lmq`, text: `🚏 Last-mile shuttle queue full at ${z.name} — boarding delays ~${Math.round((z.value - 80) * 1.4)} min for the final leg to the venue.` });
           }
         });
         return list.sort((a, b) => (a.level === "critical" ? -1 : 1));
@@ -1020,20 +1033,21 @@
             const eta = r ? r.eta : Math.round(dist * 2 + 8);
             const spare = clamp((92 - t.value) / 100, 0, 1);
             const score = 0.5 * spare + 0.3 * (1 / (1 + dist)) + 0.2 * (1 / (1 + eta / 10));
-            return { zone: t, dist: +dist.toFixed(1), eta, mode: r ? r.mode : "Shuttle", sparePct: Math.round(92 - t.value), score };
+            const lastMile = r && r.lastMile ? `${r.lastMile.mode} ${r.lastMile.mins} min` : `Walk ~${Math.max(4, Math.round(dist * 1.5))} min`;
+            return { zone: t, dist: +dist.toFixed(1), eta, mode: r ? r.mode : "Shuttle", sparePct: Math.round(92 - t.value), score, route: r, lastMile };
           })
           .sort((a, b) => b.score - a.score)
           .slice(0, 3);
       }
       function showTheWay(src, alt) {
         audio.playBlip(640);
-        const mode = alt.mode.toLowerCase();
-        const stop = mode.includes("metro") || mode.includes("train")
-          ? "station entrance"
-          : mode.includes("shuttle") || mode.includes("bus")
-          ? "pick-up point"
-          : "stop";
-        pushToast(`🧭 ${src.name} → ${alt.zone.name}: take the ${alt.mode} (~${alt.eta} min). Follow the event signage to the ${stop}.`, "good");
+        const r = alt.route;
+        const trunk = r ? `${r.mode} ~${r.eta} min` : `Shuttle ~${alt.eta} min`;
+        const lm = alt.lastMile;
+        const queueZone = r && r.lastMile ? zones.find((z) => z.id === r.lastMile.queue) : null;
+        const queueFull = queueZone && queueZone.value >= 85;
+        const extra = queueFull ? ` ⚠️ Last-mile ${r.lastMile.mode.toLowerCase()} queue is full at ${queueZone.name} — expect boarding delays.` : "";
+        pushToast(`🧭 ${src.name} → ${alt.zone.name}: ${trunk}, then ${lm} to the ${alt.zone.name} gate.${extra}`, queueFull ? "warn" : "good");
       }
 
       const recs = useMemo(() => {
@@ -1051,6 +1065,28 @@
         return { hotel, transit };
       }, [zones]);
 
+      // Live incentives — real values computed from the load gap between stressed and relief zones
+      const incentives = useMemo(() => {
+        const out = { hotel: null, offPeak: null };
+        if (recs.hotel) {
+          const gap = recs.hotel.stressed.value - recs.hotel.relief.value;
+          out.hotel = {
+            discount: clamp(Math.round(gap * 1.1), 5, 40),
+            relief: recs.hotel.relief,
+            stressed: recs.hotel.stressed
+          };
+        }
+        const transitZones = zones.filter((z) => z.type === "transit");
+        const peak = transitZones.reduce((m, z) => Math.max(m, z.value), 0);
+        if (peak >= 62 && transitZones.length) {
+          out.offPeak = {
+            deltaMin: clamp(Math.round((peak - 45) * 0.5), 5, 45),
+            peakZone: transitZones.find((z) => z.value === peak)
+          };
+        }
+        return out;
+      }, [recs, zones]);
+
       const rlReward = useMemo(() => {
         const avgLoad = zones.reduce((a, b) => a + b.value, 0) / zones.length;
         const variance = zones.reduce((a, b) => a + Math.pow(b.value - avgLoad, 2), 0) / zones.length;
@@ -1063,6 +1099,43 @@
         setSurge({ active: true, step: 0 });
         setActionLog((l) => [...l, `T+${clock}m — Event-end surge cascade triggered at ${city.venueName}`]);
         pushToast(`⚡ Ran the "event ends now" scenario for ${city.venueName}.`, "warn");
+      }
+
+      // Event schedule controls — a schedule shift recomputes phases, re-drives physics, and pushes new alerts
+      function shiftSchedule(kind) {
+        audio.playBlip(620);
+        if (kind === "endearly") setSurge({ active: true, step: 0 });
+        setSchedule((prev) => {
+          const next = prev.map((p) => ({ ...p }));
+          let note = "";
+          if (kind === "delay") {
+            next.forEach((p) => { p.start += 30; p.end += 30; });
+            note = `⏰ ${city.venueName} doors delayed 30 min — arrival pressure shifts later. Forecasts recomputed.`;
+          } else if (kind === "extend") {
+            const main = next.find((p) => p.id === "main");
+            main.end += 45;
+            const exit = next.find((p) => p.id === "exit");
+            if (exit && exit.end < main.end + 60) exit.end = main.end + 60;
+            note = `⏰ Main event extended 45 min — the exit surge is pushed later and softened.`;
+          } else if (kind === "endearly") {
+            const nowClock = clockRef.current;
+            next.forEach((p) => { if (p.start > nowClock) p.start = nowClock; if (p.end > nowClock) p.end = nowClock; });
+            note = `🏁 ${city.venueName} ended early — the full egress surge is happening NOW.`;
+          }
+          setActionLog((l) => [...l.slice(-49), `T+${clock}m — Schedule change (${kind}): ${note}`]);
+          pushToast(note, "warn");
+          return next;
+        });
+      }
+
+      function toggleOverflow() {
+        audio.playBlip(560);
+        setOverflowActive((prev) => {
+          const next = !prev;
+          setActionLog((l) => [...l.slice(-49), `T+${clock}m — Overflow / hold-queue control ${next ? "ACTIVATED" : "RELEASED"} at ${city.venueName}`]);
+          pushToast(next ? "🛡️ Overflow control active — arrivals held in queue, venue pressure easing." : "🛡️ Overflow control released — normal admission resumed.", next ? "warn" : "good");
+          return next;
+        });
       }
 
       function toggleRain() {
@@ -1138,6 +1211,7 @@
             (isEmergency ? " An ambulance route is active and traffic lights are cleared for it." : "") +
             ` Overall city health: ${rlReward}/100.\n\n` +
             `Suggested next steps:\n` +
+            (incentives.hotel ? `• Live incentive active: ${incentives.hotel.discount}% off bookings at ${incentives.hotel.relief.name} until the load gap closes.\n` : "") +
             `• Keep the exit lights green longer so crowds leave the venue faster.\n` +
             `• Send more shuttles to the busiest station: ${zones.find(z => z.type === "transit" && z.value >= 65)?.name || "the main transit hub"}.\n` +
             `• Redirect new guests to a less full hotel, e.g. ${zones.find(z => z.type === "hotel" && z.value < 50)?.name || "the South District"}.\n` +
@@ -1164,7 +1238,9 @@
               ? `It's raining in ${city.name}. Trains and shuttles are running about 12–15 minutes late, and extra buses have been added.`
               : `The weather in ${city.name} is clear, so everything is moving normally.`;
           } else if (q.includes("leave") || q.includes("time")) {
-            reply = `The best departure window is within the next 15 minutes. Departing now avoids the peak exodus spike and qualifies for a discounted return fare.`;
+            reply = incentives.offPeak
+              ? `The best departure window is right now — leaving immediately skips about ${incentives.offPeak.deltaMin} min of peak crowds at ${incentives.offPeak.peakZone.name}. Departing now also qualifies for the discounted off-peak return fare.`
+              : `Departure pressure is still low. The peak exodus builds after ${fmtMin(schedule[schedule.length - 1].start)} — leaving before then keeps you ahead of the crowd.`;
           } else {
             reply = `Right now the ${city.venueName} area is about ${zones[0].value.toFixed(0)}% full. The fastest way out is the main shuttle line.`;
           }
