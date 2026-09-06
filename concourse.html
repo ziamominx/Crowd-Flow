@@ -1917,18 +1917,38 @@
             </div>
           )}
 
-          {/* EVENT TIMELINE FOOTER (CrowdFlow reference) */}
+          {/* EVENT TIMELINE FOOTER — live schedule phases (CrowdFlow reference) */}
           <div className="mt-5 p-4 bg-[#121926]/70 backdrop-blur-md border border-white/5 rounded-lg">
             <div className="flex items-center gap-3">
               <span className="text-[11px] font-mono text-[#7C8AA0] w-11 flex-shrink-0">{fmtMin(960)}</span>
-              <div className="relative flex-1 h-1.5 rounded bg-gradient-to-r from-emerald-500 via-amber-400 to-red-500">
+              <div className="relative flex-1 h-2.5 rounded overflow-hidden bg-[#0B0F17] border border-[#1d2636]">
+                {schedule.map((p) => {
+                  const left = ((p.start - 960) / 360) * 100;
+                  const width = ((p.end - p.start) / 360) * 100;
+                  const done = clock >= p.end;
+                  const active = phaseAt(schedule, clock) === p.id;
+                  return (
+                    <div key={p.id} className="absolute top-0 bottom-0 transition-all duration-700"
+                      style={{ left: `${clamp(left, 0, 100)}%`, width: `${clamp(width, 0, Math.max(0, 100 - clamp(left, 0, 100)))}%`, background: done ? p.color + "33" : p.color + (active ? "EE" : "99"), borderRight: "1px solid rgba(5,8,14,0.9)" }}
+                      title={`${p.label} ${fmtMin(p.start)} – ${fmtMin(p.end)}`} />
+                  );
+                })}
                 <div
                   className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-white border-2 border-cyan-400 shadow-[0_0_12px_rgba(34,211,238,0.9)] transition-all duration-700"
                   style={{ left: `${clamp((clock / 360) * 100, 0, 100)}%` }}
                 />
-                <div className="absolute top-0 bottom-0 w-0.5 bg-white/60" style={{ left: "33.3%" }} title="Event window 18:00 – 21:30" />
               </div>
               <span className="text-[11px] font-mono text-[#7C8AA0] w-11 flex-shrink-0 text-right">{fmtMin(1320)}</span>
+            </div>
+            <div className="flex flex-wrap gap-x-3 gap-y-1.5 mt-2">
+              {schedule.map((p) => {
+                const active = phaseAt(schedule, clock) === p.id;
+                return (
+                  <span key={p.id} className="text-[10px] font-mono px-1.5 py-0.5 rounded border" style={active ? { color: p.color, borderColor: p.color + "66", background: p.color + "14" } : { color: "#7C8AA0", borderColor: "transparent" }}>
+                    {p.label} {fmtMin(p.start)}
+                  </span>
+                );
+              })}
             </div>
             <div className="flex flex-wrap gap-x-6 gap-y-2 mt-3 text-[11px] text-[#7C8AA0]">
               <div className="flex flex-col gap-0.5"><b className="text-[13px] text-[#E8EDF4] font-mono">{fmtMin(960 + clock)}</b><span>simulated time</span></div>
@@ -1937,7 +1957,7 @@
               <div className="flex flex-col gap-0.5"><b className="text-[13px] text-emerald-400 font-mono">{actionLog.length}</b><span>actions taken</span></div>
               <div className="flex flex-col gap-0.5 lg:ml-auto">
                 <b className="text-[13px] text-[#E8EDF4]">🎵 {city.eventName}</b>
-                <span className="font-mono">{fmtMin(1080)} – {fmtMin(1290)} · {city.venueName}</span>
+                <span className="font-mono">{fmtMin(schedule[0].start)} – {fmtMin(schedule[schedule.length - 1].end)} · {city.venueName}</span>
               </div>
             </div>
           </div>

@@ -215,14 +215,53 @@
 
     // Inter-zone transport links (same zone topology in every city)
     const CITY_ROUTES = [
-      { id: "r1", from: "venue", to: "transitHub", mode: "Metro", eta: 8 },
-      { id: "r2", from: "venue", to: "transitE", mode: "Shuttle", eta: 12 },
-      { id: "r3", from: "venue", to: "corridor", mode: "Shuttle", eta: 10 },
-      { id: "r4", from: "transitHub", to: "hotelN", mode: "Metro", eta: 14 },
-      { id: "r5", from: "transitE", to: "hotelS", mode: "Metro", eta: 16 },
-      { id: "r6", from: "transitHub", to: "corridor", mode: "Bus", eta: 18 },
-      { id: "r7", from: "transitE", to: "corridor", mode: "Bus", eta: 20 }
+      { id: "r1", from: "venue", to: "transitHub", mode: "Metro", eta: 8, lastMile: { mode: "Walk", mins: 9, queue: "transitHub" } },
+      { id: "r2", from: "venue", to: "transitE", mode: "Shuttle", eta: 12, lastMile: { mode: "Walk", mins: 5, queue: "transitE" } },
+      { id: "r3", from: "venue", to: "corridor", mode: "Shuttle", eta: 10, lastMile: { mode: "Walk", mins: 4, queue: "corridor" } },
+      { id: "r4", from: "transitHub", to: "hotelN", mode: "Metro", eta: 14, lastMile: { mode: "Local Shuttle", mins: 7, queue: "transitHub" } },
+      { id: "r5", from: "transitE", to: "hotelS", mode: "Metro", eta: 16, lastMile: { mode: "Walk", mins: 11, queue: "transitE" } },
+      { id: "r6", from: "transitHub", to: "corridor", mode: "Bus", eta: 18, lastMile: { mode: "Walk", mins: 3, queue: "transitHub" } },
+      { id: "r7", from: "transitE", to: "corridor", mode: "Bus", eta: 20, lastMile: { mode: "Local Shuttle", mins: 8, queue: "transitE" } }
     ];
+
+    // Per-city event schedule factory — time-blocked phases drive the live zone physics
+    function makeSchedule({ doors = 1080, doorLen = 50, mainLen = 90, interLen = 30, exitLen = 70 }) {
+      const d = doors, m = d + doorLen, i = m + mainLen, e = i + interLen;
+      return [
+        { id: "doors", label: "Doors Open", start: d, end: m, color: "#38BDF8" },
+        { id: "main", label: "Main Event", start: m, end: i, color: "#A78BFA" },
+        { id: "intermission", label: "Intermission", start: i, end: e, color: "#F5A623" },
+        { id: "exit", label: "Exit", start: e, end: e + exitLen, color: "#FF5C6C" }
+      ];
+    }
+
+    // Phase → per-zone load force applied every 5-min physics tick (event-schedule scenario)
+    const PHASE_FORCES = {
+      pre: { venue: 0.5, transitHub: 0.4, transitE: 0.2, corridor: 0.3 },
+      doors: { venue: 2.9, transitHub: 1.1, transitE: 0.6, corridor: 0.7, hotelN: 0.3 },
+      main: { venue: 1.2, hotelN: 0.6, hotelS: 0.4, corridor: 0.5, transitHub: 0.3 },
+      intermission: { venue: -0.8, transitHub: 1.4, transitE: 1.0, hotelN: 0.6, corridor: 0.4 },
+      exit: { venue: -3.2, transitHub: 2.9, transitE: 1.6, hotelS: 0.9, corridor: 1.8, hotelN: 0.5 },
+      ended: { venue: -2.5, transitHub: 1.0, transitE: 0.8, corridor: 0.6 }
+    };
+
+    function phaseAt(schedule, clock) {
+      if (!schedule || schedule.length === 0) return "ended";
+      if (clock < schedule[0].start) return "pre";
+      if (clock >= schedule[schedule.length - 1].end) return "ended";
+      for (const p of schedule) if (clock >= p.start && clock < p.end) return p.id;
+      return schedule[schedule.length - 1].id;
+    }
+
+    // Venue capacity state machine — distinct from generic "critical" zone load
+    function venueState(z) {
+      if (!z || z.type !== "venue") return null;
+      const v = z.value;
+      if (v >= 96) return { state: "atCapacity", wait: clamp(Math.round((v - 90) * 2.2), 5, 90), label: "AT CAPACITY" };
+      if (v >= 82) return { state: "critical", wait: clamp(Math.round((v - 80) * 1.4), 5, 30), label: "NEAR CAPACITY" };
+      if (v >= 68) return { state: "warning", wait: 0, label: "FILLING UP" };
+      return { state: "open", wait: 0, label: "OPEN" };
+    }
 
     const CITIES_DATA = {
       navimumbai: {
@@ -231,6 +270,7 @@
         flag: "🇮🇳",
         venueName: "Pillai College of Engineering Campus",
         eventName: "Alegria Festival — Main Concert (50,000+ footfall)",
+        schedule: makeSchedule({ doors: 1080, doorLen: 50, mainLen: 90, interLen: 30, exitLen: 70 }),
         coords: "19.0176° N, 73.1062° E",
         currency: "₹",
         speedUnit: "km/h",
@@ -253,6 +293,7 @@
         flag: "🇬🇧",
         venueName: "Wembley Stadium",
         eventName: "UEFA European Final & World Arena Concert",
+        schedule: makeSchedule({ doors: 1050, doorLen: 60, mainLen: 100, interLen: 30, exitLen: 80 }),
         coords: "51.5560° N, 0.2795° W",
         currency: "£",
         speedUnit: "mph",
@@ -275,6 +316,7 @@
         flag: "🇺🇸",
         venueName: "MetLife Stadium",
         eventName: "World Cup Finals & Summer Music Festival",
+        schedule: makeSchedule({ doors: 1080, doorLen: 60, mainLen: 100, interLen: 30, exitLen: 70 }),
         coords: "40.8128° N, 74.0742° W",
         currency: "$",
         speedUnit: "mph",
@@ -297,6 +339,7 @@
         flag: "🇯🇵",
         venueName: "Japan National Stadium",
         eventName: "World Athletics Championships & Tech Expo",
+        schedule: makeSchedule({ doors: 1030, doorLen: 60, mainLen: 120, interLen: 30, exitLen: 60 }),
         coords: "35.6778° N, 139.7145° E",
         currency: "¥",
         speedUnit: "km/h",
@@ -319,6 +362,7 @@
         flag: "🇮🇳",
         venueName: "Kanteerava Stadium & KTPO",
         eventName: "GIDS Global Developer Summit & IPL Match",
+        schedule: makeSchedule({ doors: 1070, doorLen: 50, mainLen: 100, interLen: 30, exitLen: 60 }),
         coords: "12.9716° N, 77.5946° E",
         currency: "₹",
         speedUnit: "km/h",
@@ -341,6 +385,7 @@
         flag: "🇦🇪",
         venueName: "Coca-Cola Arena & Expo City",
         eventName: "World Government Summit & Mega Concert",
+        schedule: makeSchedule({ doors: 1080, doorLen: 60, mainLen: 75, interLen: 30, exitLen: 50 }),
         coords: "25.2048° N, 55.2708° E",
         currency: "AED",
         speedUnit: "km/h",
@@ -648,6 +693,16 @@
       const [actionLog, setActionLog] = useState([]);
       const [clock, setClock] = useState(0);
 
+      // Event schedule state (per-city phases, editable mid-simulation)
+      const [schedule, setSchedule] = useState(() => CITIES_DATA.navimumbai.schedule.map((p) => ({ ...p })));
+      const [overflowActive, setOverflowActive] = useState(false);
+      const phaseInfo = useMemo(() => {
+        const ph = phaseAt(schedule, clock);
+        const p = schedule.find((x) => x.id === ph);
+        if (p) return { label: p.label, color: p.color };
+        return ph === "pre" ? { label: "Pre-Event", color: "#4FD8E0" } : { label: "Event Over", color: "#7C8AA0" };
+      }, [schedule, clock]);
+
       // Physics states
       const [isRain, setIsRain] = useState(false);
       const [isEmergency, setIsEmergency] = useState(false);
@@ -670,11 +725,18 @@
       const surgeRef = useRef(surge);
       const isRainRef = useRef(isRain);
       const isEmergencyRef = useRef(isEmergency);
+      const clockRef = useRef(clock);
+      const scheduleRef = useRef(schedule);
+      const overflowRef = useRef(overflowActive);
+      const lastPhaseRef = useRef(phaseAt(schedule, 0));
 
       useEffect(() => { shuttlesRef.current = shuttles; }, [shuttles]);
       useEffect(() => { surgeRef.current = surge; }, [surge]);
       useEffect(() => { isRainRef.current = isRain; }, [isRain]);
       useEffect(() => { isEmergencyRef.current = isEmergency; }, [isEmergency]);
+      useEffect(() => { clockRef.current = clock; }, [clock]);
+      useEffect(() => { scheduleRef.current = schedule; }, [schedule]);
+      useEffect(() => { overflowRef.current = overflowActive; }, [overflowActive]);
 
       // Toast feedback stack
       const pushToast = useCallback((text, kind = "info") => {
@@ -684,13 +746,16 @@
       }, []);
 
       // One simulated physics step for all zones (shared by tick, skip & reset)
-      function advanceZones(prev, scriptedStep) {
+      function advanceZones(prev, scriptedStep, phaseId = "ended", overflowOn = false) {
         return prev.map((z) => {
           const noise = (Math.random() - 0.5) * 3.5;
           let scripted = 0;
           if (scriptedStep != null && SURGE_SCRIPT[z.id] && scriptedStep < SURGE_SCRIPT[z.id].length) {
             scripted = SURGE_SCRIPT[z.id][scriptedStep];
           }
+
+          const phaseForce = (PHASE_FORCES[phaseId] && PHASE_FORCES[phaseId][z.id]) || 0;
+          const overflowEffect = overflowOn && z.id === "venue" ? -4.5 : overflowOn && (z.id === "corridor" || z.id === "transitHub") ? 1.2 : 0;
 
           let shuttleEffect = 0;
           if (z.type === "transit") {
@@ -702,7 +767,7 @@
           let emergencyEffect = (isEmergencyRef.current && z.type === "transit") ? -6.0 : 0;
           const reversion = (z.baseline - z.value) * 0.08;
 
-          const nextVal = clamp(z.value + noise + scripted - shuttleEffect + weatherEffect + emergencyEffect + reversion, 5, 98);
+          const nextVal = clamp(z.value + noise + scripted - shuttleEffect + weatherEffect + emergencyEffect + phaseForce + overflowEffect + reversion, 5, 98);
           const history = [...z.history, { t: z.history[z.history.length - 1].t + 1, v: nextVal }].slice(-14);
 
           const recent = history.slice(-4);
@@ -735,8 +800,9 @@
       // Simulation transport controls (CrowdFlow reference)
       function handleSkip() {
         audio.playBlip(500);
-        setClock((c) => c + 30);
-        setZones((prev) => advanceZones(prev, null));
+        const next = clock + 30;
+        setClock(next);
+        setZones((prev) => advanceZones(prev, null, phaseAt(schedule, next), overflowActive));
         pushToast(`⏩ +30 min fast-forward — inflow building at ${city.venueName}.`, "info");
       }
 
@@ -746,6 +812,9 @@
         setShuttles(city.shuttleBaseline);
         setClock(0);
         setSurge({ active: false, step: 0 });
+        setSchedule(city.schedule.map((p) => ({ ...p })));
+        setOverflowActive(false);
+        lastPhaseRef.current = "pre";
         setActionLog([]);
         pushToast("↺ Simulation reset — telemetry re-seeded to baseline.", "good");
       }
@@ -776,6 +845,9 @@
         const newCity = CITIES_DATA[key];
         setZones(initCityZones(key));
         setShuttles(newCity.shuttleBaseline);
+        setSchedule(newCity.schedule.map((p) => ({ ...p })));
+        setOverflowActive(false);
+        lastPhaseRef.current = phaseAt(newCity.schedule, 0);
         setSelectedId("venue");
         setBriefing("");
         setChatMessages([]);
@@ -785,7 +857,17 @@
       useEffect(() => {
         if (!running) return;
         const interval = setInterval(() => {
-          setZones((prev) => advanceZones(prev, surgeRef.current.active ? surgeRef.current.step : null));
+          const now = clockRef.current;
+          const phId = phaseAt(scheduleRef.current, now);
+          // Cascading schedule alerts — fire when the live event crosses phase boundaries
+          if (lastPhaseRef.current && lastPhaseRef.current !== phId && phId === "exit") {
+            pushToast(`🚪 ${city.venueName} exit phase has started — egress pressure is building on transit and the corridor.`, "warn");
+          }
+          if (lastPhaseRef.current && lastPhaseRef.current !== phId && phId === "ended") {
+            pushToast(`🏁 ${city.venueName} event window has closed — crowd pressure is dispersing.`, "info");
+          }
+          lastPhaseRef.current = phId;
+          setZones((prev) => advanceZones(prev, surgeRef.current.active ? surgeRef.current.step : null, phId, overflowRef.current));
           setClock((c) => c + 5);
           setSurge((s) => (s.active ? (s.step + 1 >= 6 ? { active: false, step: 0 } : { ...s, step: s.step + 1 }) : s));
         }, 3200 / speedMult);
@@ -793,17 +875,30 @@
         return () => clearInterval(interval);
       }, [selectedCityKey, city, running, speedMult]);
 
-      // Alerts
+      // Alerts — venue capacity, last-mile queues, plus generic zone pressure
       const alerts = useMemo(() => {
         const list = [];
         zones.forEach((z) => {
           const status = statusOf(z.value);
           if (status === "critical") {
-            list.push({ level: "critical", id: z.id, text: `${z.name} is ${z.value.toFixed(0)}% full — very crowded right now.` });
+            if (z.type === "venue") {
+              const vs = venueState(z);
+              if (vs.state === "atCapacity") {
+                list.push({ level: "critical", id: "venue:cap", text: `🚧 ${z.name} is AT CAPACITY — entry paused (~${vs.wait} min wait). Activate overflow control or hold the queue.` });
+              } else {
+                list.push({ level: "critical", id: "venue:crit", text: `${z.name} is near capacity (${z.value.toFixed(0)}% full) — admission should be throttled now.` });
+              }
+            } else {
+              list.push({ level: "critical", id: z.id, text: `${z.name} is ${z.value.toFixed(0)}% full — very crowded right now.` });
+            }
           } else if (status === "warning") {
             list.push({ level: "warning", id: z.id, text: `${z.name} is getting busy (${z.value.toFixed(0)}% full). Traffic there has slowed to ${z.speed} ${city.speedUnit}.` });
           } else if (z.forecast >= 80 && z.value < 75) {
             list.push({ level: "warning", id: z.id, text: `${z.name} could reach ${z.forecast.toFixed(0)}% within 15 minutes — worth watching.` });
+          }
+          // Last-mile failure mode: station → gate shuttle queue is full
+          if (z.type === "transit" && z.value >= 85) {
+            list.push({ level: "warning", id: `${z.id}:lmq`, text: `🚏 Last-mile shuttle queue full at ${z.name} — boarding delays ~${Math.round((z.value - 80) * 1.4)} min for the final leg to the venue.` });
           }
         });
         return list.sort((a, b) => (a.level === "critical" ? -1 : 1));
@@ -833,20 +928,21 @@
             const eta = r ? r.eta : Math.round(dist * 2 + 8);
             const spare = clamp((92 - t.value) / 100, 0, 1);
             const score = 0.5 * spare + 0.3 * (1 / (1 + dist)) + 0.2 * (1 / (1 + eta / 10));
-            return { zone: t, dist: +dist.toFixed(1), eta, mode: r ? r.mode : "Shuttle", sparePct: Math.round(92 - t.value), score };
+            const lastMile = r && r.lastMile ? `${r.lastMile.mode} ${r.lastMile.mins} min` : `Walk ~${Math.max(4, Math.round(dist * 1.5))} min`;
+            return { zone: t, dist: +dist.toFixed(1), eta, mode: r ? r.mode : "Shuttle", sparePct: Math.round(92 - t.value), score, route: r, lastMile };
           })
           .sort((a, b) => b.score - a.score)
           .slice(0, 3);
       }
       function showTheWay(src, alt) {
         audio.playBlip(640);
-        const mode = alt.mode.toLowerCase();
-        const stop = mode.includes("metro") || mode.includes("train")
-          ? "station entrance"
-          : mode.includes("shuttle") || mode.includes("bus")
-          ? "pick-up point"
-          : "stop";
-        pushToast(`🧭 ${src.name} → ${alt.zone.name}: take the ${alt.mode} (~${alt.eta} min). Follow the event signage to the ${stop}.`, "good");
+        const r = alt.route;
+        const trunk = r ? `${r.mode} ~${r.eta} min` : `Shuttle ~${alt.eta} min`;
+        const lm = alt.lastMile;
+        const queueZone = r && r.lastMile ? zones.find((z) => z.id === r.lastMile.queue) : null;
+        const queueFull = queueZone && queueZone.value >= 85;
+        const extra = queueFull ? ` ⚠️ Last-mile ${r.lastMile.mode.toLowerCase()} queue is full at ${queueZone.name} — expect boarding delays.` : "";
+        pushToast(`🧭 ${src.name} → ${alt.zone.name}: ${trunk}, then ${lm} to the ${alt.zone.name} gate.${extra}`, queueFull ? "warn" : "good");
       }
 
       const recs = useMemo(() => {
@@ -864,6 +960,28 @@
         return { hotel, transit };
       }, [zones]);
 
+      // Live incentives — real values computed from the load gap between stressed and relief zones
+      const incentives = useMemo(() => {
+        const out = { hotel: null, offPeak: null };
+        if (recs.hotel) {
+          const gap = recs.hotel.stressed.value - recs.hotel.relief.value;
+          out.hotel = {
+            discount: clamp(Math.round(gap * 1.1), 5, 40),
+            relief: recs.hotel.relief,
+            stressed: recs.hotel.stressed
+          };
+        }
+        const transitZones = zones.filter((z) => z.type === "transit");
+        const peak = transitZones.reduce((m, z) => Math.max(m, z.value), 0);
+        if (peak >= 62 && transitZones.length) {
+          out.offPeak = {
+            deltaMin: clamp(Math.round((peak - 45) * 0.5), 5, 45),
+            peakZone: transitZones.find((z) => z.value === peak)
+          };
+        }
+        return out;
+      }, [recs, zones]);
+
       const rlReward = useMemo(() => {
         const avgLoad = zones.reduce((a, b) => a + b.value, 0) / zones.length;
         const variance = zones.reduce((a, b) => a + Math.pow(b.value - avgLoad, 2), 0) / zones.length;
@@ -876,6 +994,43 @@
         setSurge({ active: true, step: 0 });
         setActionLog((l) => [...l, `T+${clock}m — Event-end surge cascade triggered at ${city.venueName}`]);
         pushToast(`⚡ Ran the "event ends now" scenario for ${city.venueName}.`, "warn");
+      }
+
+      // Event schedule controls — a schedule shift recomputes phases, re-drives physics, and pushes new alerts
+      function shiftSchedule(kind) {
+        audio.playBlip(620);
+        if (kind === "endearly") setSurge({ active: true, step: 0 });
+        setSchedule((prev) => {
+          const next = prev.map((p) => ({ ...p }));
+          let note = "";
+          if (kind === "delay") {
+            next.forEach((p) => { p.start += 30; p.end += 30; });
+            note = `⏰ ${city.venueName} doors delayed 30 min — arrival pressure shifts later. Forecasts recomputed.`;
+          } else if (kind === "extend") {
+            const main = next.find((p) => p.id === "main");
+            main.end += 45;
+            const exit = next.find((p) => p.id === "exit");
+            if (exit && exit.end < main.end + 60) exit.end = main.end + 60;
+            note = `⏰ Main event extended 45 min — the exit surge is pushed later and softened.`;
+          } else if (kind === "endearly") {
+            const nowClock = clockRef.current;
+            next.forEach((p) => { if (p.start > nowClock) p.start = nowClock; if (p.end > nowClock) p.end = nowClock; });
+            note = `🏁 ${city.venueName} ended early — the full egress surge is happening NOW.`;
+          }
+          setActionLog((l) => [...l.slice(-49), `T+${clock}m — Schedule change (${kind}): ${note}`]);
+          pushToast(note, "warn");
+          return next;
+        });
+      }
+
+      function toggleOverflow() {
+        audio.playBlip(560);
+        setOverflowActive((prev) => {
+          const next = !prev;
+          setActionLog((l) => [...l.slice(-49), `T+${clock}m — Overflow / hold-queue control ${next ? "ACTIVATED" : "RELEASED"} at ${city.venueName}`]);
+          pushToast(next ? "🛡️ Overflow control active — arrivals held in queue, venue pressure easing." : "🛡️ Overflow control released — normal admission resumed.", next ? "warn" : "good");
+          return next;
+        });
       }
 
       function toggleRain() {
@@ -951,6 +1106,7 @@
             (isEmergency ? " An ambulance route is active and traffic lights are cleared for it." : "") +
             ` Overall city health: ${rlReward}/100.\n\n` +
             `Suggested next steps:\n` +
+            (incentives.hotel ? `• Live incentive active: ${incentives.hotel.discount}% off bookings at ${incentives.hotel.relief.name} until the load gap closes.\n` : "") +
             `• Keep the exit lights green longer so crowds leave the venue faster.\n` +
             `• Send more shuttles to the busiest station: ${zones.find(z => z.type === "transit" && z.value >= 65)?.name || "the main transit hub"}.\n` +
             `• Redirect new guests to a less full hotel, e.g. ${zones.find(z => z.type === "hotel" && z.value < 50)?.name || "the South District"}.\n` +
@@ -977,7 +1133,9 @@
               ? `It's raining in ${city.name}. Trains and shuttles are running about 12–15 minutes late, and extra buses have been added.`
               : `The weather in ${city.name} is clear, so everything is moving normally.`;
           } else if (q.includes("leave") || q.includes("time")) {
-            reply = `The best departure window is within the next 15 minutes. Departing now avoids the peak exodus spike and qualifies for a discounted return fare.`;
+            reply = incentives.offPeak
+              ? `The best departure window is right now — leaving immediately skips about ${incentives.offPeak.deltaMin} min of peak crowds at ${incentives.offPeak.peakZone.name}. Departing now also qualifies for the discounted off-peak return fare.`
+              : `Departure pressure is still low. The peak exodus builds after ${fmtMin(schedule[schedule.length - 1].start)} — leaving before then keeps you ahead of the crowd.`;
           } else {
             reply = `Right now the ${city.venueName} area is about ${zones[0].value.toFixed(0)}% full. The fastest way out is the main shuttle line.`;
           }
@@ -1143,6 +1301,9 @@
               <span className="text-emerald-400 flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 beacon-pulse"></span> Live — updating every few seconds
               </span>
+              <span className="px-2 py-0.5 rounded border font-mono" style={{ color: phaseInfo.color, borderColor: phaseInfo.color + "55", background: phaseInfo.color + "14" }}>
+                {phaseInfo.label}
+              </span>
             </div>
           </div>
 
@@ -1286,6 +1447,34 @@
                   </div>
                 </SpotlightCard>
 
+                {/* EVENT SCHEDULE — time-blocked phases with mid-simulation controls */}
+                <SpotlightCard className="p-4" accent={COLORS.ai}>
+                  <div className="text-[11px] font-mono tracking-wider text-[#7C8AA0] uppercase font-semibold mb-2">
+                    Event Schedule — {city.venueName}
+                  </div>
+                  <div className="space-y-1.5 mb-3">
+                    {schedule.map((p) => {
+                      const active = phaseAt(schedule, clock) === p.id;
+                      const done = clock >= p.end;
+                      return (
+                        <div key={p.id} className={`flex items-center justify-between text-[11px] px-2 py-1 rounded border ${active ? "bg-white/5 border-white/20" : done ? "border-[#1d2636] opacity-45" : "border-[#263042]"}`}>
+                          <span className="flex items-center gap-1.5 font-medium text-[#E8EDF4]">
+                            <span className="w-2 h-2 rounded-full" style={{ background: p.color }}></span>
+                            {p.label}
+                            {active && <span className="text-[9px] font-mono text-cyan-300 border border-cyan-400/40 px-1 rounded">NOW</span>}
+                          </span>
+                          <span className="font-mono text-[#7C8AA0]">{fmtMin(p.start)} – {fmtMin(p.end)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={() => shiftSchedule("delay")} className="flex-1 text-[10.5px] font-mono px-2 py-1.5 rounded border border-[#38BDF8]/50 text-sky-300 hover:bg-sky-950/40 cursor-pointer transition-all" title="Push every phase 30 min later — arrival pressure shifts">⏰ Delay 30m</button>
+                    <button onClick={() => shiftSchedule("extend")} className="flex-1 text-[10.5px] font-mono px-2 py-1.5 rounded border border-[#A78BFA]/50 text-purple-300 hover:bg-purple-950/40 cursor-pointer transition-all" title="Extend the main event 45 min — softens and delays the exit surge">➕ Extend 45m</button>
+                    <button onClick={() => shiftSchedule("endearly")} className="flex-1 text-[10.5px] font-mono px-2 py-1.5 rounded border border-[#FF5C6C]/60 text-[#FF5C6C] hover:bg-red-950/40 cursor-pointer transition-all" title="End the event now — triggers the egress surge immediately">🏁 End Early</button>
+                  </div>
+                </SpotlightCard>
+
                 {/* SCRIPTED SHOCK EVENTS (CrowdFlow reference) */}
                 <SpotlightCard className="p-4" accent={COLORS.critical}>
                   <div className="text-[11px] font-mono tracking-wider text-[#7C8AA0] uppercase font-semibold mb-2">
@@ -1366,6 +1555,18 @@
                         </button>
                       </div>
                     )}
+
+                    {(() => { const vs = venueState(zones.find((z) => z.type === "venue")); return vs && (vs.state === "critical" || vs.state === "atCapacity") ? (
+                      <div className="p-2.5 bg-[#161F2E]/80 rounded border border-[#263042] flex items-center justify-between">
+                        <div>
+                          <div className="text-[12px] font-medium text-[#E8EDF4]">Activate Overflow / Hold Queue</div>
+                          <div className="text-[10px] text-[#7C8AA0]">{overflowActive ? "Arrivals held in queue — venue pressure easing." : `Venue at ${zones.find((z) => z.type === "venue").value.toFixed(0)}% — hold arrivals at Gate B while the crowd clears.`}</div>
+                        </div>
+                        <button onClick={toggleOverflow} className={`text-[11px] px-2.5 py-1 rounded border transition-all cursor-pointer font-mono ${overflowActive ? "bg-red-950/70 border-red-500 text-red-300" : "border-[#F5A623]/50 text-amber-300 hover:bg-amber-950/30"}`}>
+                          {overflowActive ? "Active ✓" : "Activate"}
+                        </button>
+                      </div>
+                    ) : null; })()}
                   </div>
                 </SpotlightCard>
 
@@ -1398,14 +1599,14 @@
                 <SpotlightCard className="p-4">
                   <div className="flex items-center justify-between mb-2">
                     <div className="text-[11px] font-mono tracking-wider text-[#7C8AA0] uppercase font-semibold flex items-center gap-1.5">
-                      <Icon name="sparkles" size={13} className="text-purple-400" /> AI Assistant
+                      <Icon name="sparkles" size={13} className="text-purple-400" /> Ops Summary
                     </div>
                     <button
                       onClick={onGenerateBriefing}
                       disabled={briefingLoading}
                       className="text-[11px] font-mono px-2.5 py-1 rounded border border-purple-500/50 text-purple-300 hover:bg-purple-950/40 cursor-pointer transition-all"
                     >
-                      {briefingLoading ? "Thinking…" : "Get a Summary"}
+                      {briefingLoading ? "Analyzing…" : "Get a Summary"}
                     </button>
                   </div>
                   {briefing ? (
@@ -1414,7 +1615,7 @@
                     </div>
                   ) : (
                     <div className="text-[11px] text-[#7C8AA0] italic font-sans">
-                      Get a plain-English summary of what's happening right now.
+                      Rule-based summary compiled locally from live telemetry — no external AI service is called.
                     </div>
                   )}
                 </SpotlightCard>
@@ -1430,6 +1631,14 @@
                     <div>Heavy rain in {city.name} — trains and shuttles are running about 12 minutes late.</div>
                   </div>
                 )}
+
+                {/* VENUE AT-CAPACITY BANNER — attendee-side admission control effect */}
+                {(() => { const vs = venueState(zones.find((z) => z.type === "venue")); return vs && vs.state === "atCapacity" ? (
+                  <div className="p-3 bg-red-950/70 border border-red-500/50 rounded flex items-center gap-2.5 text-red-200 text-xs animate-pulse">
+                    <Icon name="alert" size={16} className="text-red-400 flex-shrink-0" />
+                    <div><b>{city.venueName} — entry closed</b> (about {vs.wait} min wait). Overflow holding area open near Gate B; concert entry resumes as the queue clears.</div>
+                  </div>
+                ) : null; })()}
 
                 {/* CROWDFLOW GUIDE — RECOMMENDED ALTERNATIVES */}
                 <SpotlightCard className="p-4">
@@ -1461,7 +1670,9 @@
                                 </span>
                               </div>
                               <div className="text-[11px] text-[#7C8AA0] mb-2 leading-snug">
-                                {sc === "critical" ? (
+                                {z.type === "venue" && venueState(z).state === "atCapacity" ? (
+                                  <>🚧 <b style={{ color: "#FF5C6C" }}>Entry closed</b> at {z.name} — about <b style={{ color: "#F5A623" }}>{venueState(z).wait} min wait</b>. Overflow holding area open near Gate B; re-check in 10 minutes.</>
+                                ) : sc === "critical" ? (
                                   <>⚠️ {z.name} is <b style={{ color: "#FF5C6C" }}>very crowded</b> right now ({Math.round(z.value)}% full) and projected to keep rising — consider the alternatives below.</>
                                 ) : (
                                   <>{z.name} is getting busy at <b style={{ color: "#F5A623" }}>{Math.round(z.value)}%</b> full. Cheaper nearby options, ranked:</>
@@ -1476,7 +1687,7 @@
                                       <span className="w-5 h-5 rounded flex items-center justify-center bg-white/10 text-[10px] font-bold text-cyan-300 flex-shrink-0">{i + 1}</span>
                                       <div className="flex-1 text-[11.5px] text-[#E8EDF4] leading-snug min-w-0">
                                         Head to <b className="text-emerald-300">{a.zone.name}</b> — only {a.zone.value.toFixed(0)}% full, <b className="text-emerald-300">{a.sparePct}%</b> capacity free.{" "}
-                                        <span className="text-[#7C8AA0]">{a.mode} · ~{a.eta} min · {a.dist} km</span>
+                                        <span className="text-[#7C8AA0]">{a.mode} ~{a.eta} min · + {a.lastMile} to the gate · {a.dist} km</span>
                                       </div>
                                       <button onClick={() => showTheWay(z, a)} className="text-[10.5px] px-2.5 py-1 rounded border border-emerald-400/50 text-emerald-300 hover:bg-emerald-400/10 cursor-pointer whitespace-nowrap flex-shrink-0">
                                         🧭 Show me the way
@@ -1490,6 +1701,36 @@
                         })}
                       </div>
                     );
+                  })()}
+                </SpotlightCard>
+
+                {/* LIVE INCENTIVES — computed in real time from zone load gaps */}
+                <SpotlightCard className="p-4">
+                  <div className="text-[11px] font-mono tracking-wider text-[#7C8AA0] uppercase font-semibold mb-2 flex items-center gap-1.5">
+                    <Icon name="zap" size={13} className="text-emerald-400" /> Live Incentives
+                  </div>
+                  {(() => {
+                    const rows = [];
+                    if (incentives.hotel) rows.push(
+                      <div key="hotel" className="p-2.5 bg-gradient-to-r from-emerald-950/60 to-[#161F2E]/80 rounded border border-emerald-500/30 flex items-start gap-2">
+                        <span className="text-lg leading-none mt-0.5">💸</span>
+                        <div className="flex-1">
+                          <div className="text-[12px] font-semibold text-emerald-300">Save {incentives.hotel.discount}% — book {incentives.hotel.relief.name} now</div>
+                          <div className="text-[10px] text-[#7C8AA0] mt-0.5">vs {incentives.hotel.stressed.name} at {incentives.hotel.stressed.value.toFixed(0)}% full · {Math.round(92 - incentives.hotel.relief.value)}% capacity free. Offer recalculates live as zones change.</div>
+                        </div>
+                      </div>
+                    );
+                    if (incentives.offPeak) rows.push(
+                      <div key="offpeak" className="p-2.5 bg-gradient-to-r from-sky-950/60 to-[#161F2E]/80 rounded border border-sky-500/30 flex items-start gap-2">
+                        <span className="text-lg leading-none mt-0.5">🚉</span>
+                        <div className="flex-1">
+                          <div className="text-[12px] font-semibold text-sky-300">Leave now — skip ~{incentives.offPeak.deltaMin} min of peak crowds</div>
+                          <div className="text-[10px] text-[#7C8AA0] mt-0.5">Peak exodus builds at {incentives.offPeak.peakZone.name} after {fmtMin(schedule[schedule.length - 1].start)}. Departing before then earns the off-peak return fare.</div>
+                        </div>
+                      </div>
+                    );
+                    if (rows.length === 0) return <div className="text-[11px] text-[#7C8AA0] italic">Demand is balanced right now — incentive offers appear when a hotel or station gets overloaded.</div>;
+                    return <div className="space-y-2">{rows}</div>;
                   })()}
                 </SpotlightCard>
 
@@ -1541,7 +1782,7 @@
               <SpotlightCard className="p-4 flex flex-col h-[540px]">
                 <div className="text-[11px] font-mono tracking-wider text-[#7C8AA0] uppercase font-semibold mb-2 flex items-center justify-between">
                   <span>Ask About {city.name}</span>
-                  <span className="text-purple-400 font-mono text-[10px]">CONNECTED</span>
+                  <span className="text-[#7C8AA0] font-mono text-[10px]" title="Rule-based guidance compiled locally from live zone data — no external AI service is called.">LOCAL ENGINE</span>
                 </div>
                 <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
                   {chatMessages.length === 0 && (
@@ -1554,7 +1795,7 @@
                       {m.text}
                     </div>
                   ))}
-                  {chatLoading && <div className="text-[11px] text-purple-400 font-mono animate-pulse">Thinking…</div>}
+                  {chatLoading && <div className="text-[11px] text-purple-400 font-mono animate-pulse">Analyzing…</div>}
                 </div>
                 <form onSubmit={(e) => { e.preventDefault(); if (chatInput.trim()) sendChat(chatInput.trim()); }} className="flex items-center gap-2 mt-3">
                   <input
@@ -1571,18 +1812,38 @@
             </div>
           )}
 
-          {/* EVENT TIMELINE FOOTER (CrowdFlow reference) */}
+          {/* EVENT TIMELINE FOOTER — live schedule phases (CrowdFlow reference) */}
           <div className="mt-5 p-4 bg-[#121926]/70 backdrop-blur-md border border-white/5 rounded-lg">
             <div className="flex items-center gap-3">
               <span className="text-[11px] font-mono text-[#7C8AA0] w-11 flex-shrink-0">{fmtMin(960)}</span>
-              <div className="relative flex-1 h-1.5 rounded bg-gradient-to-r from-emerald-500 via-amber-400 to-red-500">
+              <div className="relative flex-1 h-2.5 rounded overflow-hidden bg-[#0B0F17] border border-[#1d2636]">
+                {schedule.map((p) => {
+                  const left = ((p.start - 960) / 360) * 100;
+                  const width = ((p.end - p.start) / 360) * 100;
+                  const done = clock >= p.end;
+                  const active = phaseAt(schedule, clock) === p.id;
+                  return (
+                    <div key={p.id} className="absolute top-0 bottom-0 transition-all duration-700"
+                      style={{ left: `${clamp(left, 0, 100)}%`, width: `${clamp(width, 0, Math.max(0, 100 - clamp(left, 0, 100)))}%`, background: done ? p.color + "33" : p.color + (active ? "EE" : "99"), borderRight: "1px solid rgba(5,8,14,0.9)" }}
+                      title={`${p.label} ${fmtMin(p.start)} – ${fmtMin(p.end)}`} />
+                  );
+                })}
                 <div
                   className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-white border-2 border-cyan-400 shadow-[0_0_12px_rgba(34,211,238,0.9)] transition-all duration-700"
                   style={{ left: `${clamp((clock / 360) * 100, 0, 100)}%` }}
                 />
-                <div className="absolute top-0 bottom-0 w-0.5 bg-white/60" style={{ left: "33.3%" }} title="Event window 18:00 – 21:30" />
               </div>
               <span className="text-[11px] font-mono text-[#7C8AA0] w-11 flex-shrink-0 text-right">{fmtMin(1320)}</span>
+            </div>
+            <div className="flex flex-wrap gap-x-3 gap-y-1.5 mt-2">
+              {schedule.map((p) => {
+                const active = phaseAt(schedule, clock) === p.id;
+                return (
+                  <span key={p.id} className="text-[10px] font-mono px-1.5 py-0.5 rounded border" style={active ? { color: p.color, borderColor: p.color + "66", background: p.color + "14" } : { color: "#7C8AA0", borderColor: "transparent" }}>
+                    {p.label} {fmtMin(p.start)}
+                  </span>
+                );
+              })}
             </div>
             <div className="flex flex-wrap gap-x-6 gap-y-2 mt-3 text-[11px] text-[#7C8AA0]">
               <div className="flex flex-col gap-0.5"><b className="text-[13px] text-[#E8EDF4] font-mono">{fmtMin(960 + clock)}</b><span>simulated time</span></div>
@@ -1591,7 +1852,7 @@
               <div className="flex flex-col gap-0.5"><b className="text-[13px] text-emerald-400 font-mono">{actionLog.length}</b><span>actions taken</span></div>
               <div className="flex flex-col gap-0.5 lg:ml-auto">
                 <b className="text-[13px] text-[#E8EDF4]">🎵 {city.eventName}</b>
-                <span className="font-mono">{fmtMin(1080)} – {fmtMin(1290)} · {city.venueName}</span>
+                <span className="font-mono">{fmtMin(schedule[0].start)} – {fmtMin(schedule[schedule.length - 1].end)} · {city.venueName}</span>
               </div>
             </div>
           </div>
