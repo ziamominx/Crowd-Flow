@@ -1197,6 +1197,18 @@
       // Event schedule controls — a schedule shift recomputes phases, re-drives physics, and pushes new alerts
       function shiftSchedule(kind) {
         audio.playBlip(620);
+        if (backendRef.current) {
+          postAction({ action: "shift_schedule", kind });
+          const bnotes = {
+            delay: `⏰ ${city.venueName} doors delayed 30 min — arrival pressure shifts later.`,
+            extend: "⏰ Main event extended 45 min — the exit surge is pushed later and softened.",
+            endearly: `🏁 ${city.venueName} ended early — the full egress surge is happening NOW.`
+          };
+          const note = bnotes[kind];
+          pushToast(note, "warn");
+          setActionLog((l) => [...l.slice(-49), `T+${clock}m — Schedule change (${kind}): ${note}`]);
+          return;
+        }
         if (kind === "endearly") setSurge({ active: true, step: 0 });
         setSchedule((prev) => {
           const next = prev.map((p) => ({ ...p }));
@@ -1223,6 +1235,7 @@
 
       function toggleOverflow() {
         audio.playBlip(560);
+        if (backendRef.current) { postAction({ action: "toggle_overflow" }); return; }
         setOverflowActive((prev) => {
           const next = !prev;
           setActionLog((l) => [...l.slice(-49), `T+${clock}m — Overflow / hold-queue control ${next ? "ACTIVATED" : "RELEASED"} at ${city.venueName}`]);
@@ -1233,6 +1246,7 @@
 
       function toggleRain() {
         audio.playBlip(440);
+        if (backendRef.current) { postAction({ action: "toggle_rain" }); return; }
         setIsRain((r) => {
           const next = !r;
           setActionLog((l) => [...l, `T+${clock}m — Weather state shifted to ${next ? "MONSOON FRICTION" : "CLEAR"}`]);
@@ -1243,6 +1257,7 @@
 
       function toggleEmergency() {
         audio.playBlip(320);
+        if (backendRef.current) { postAction({ action: "toggle_emergency" }); return; }
         setIsEmergency((e) => {
           const next = !e;
           setActionLog((l) => [...l, `T+${clock}m — Priority ambulance corridor ${next ? "ENGAGED" : "RELEASED"}`]);
@@ -1253,6 +1268,7 @@
 
       function applySignalExtension() {
         audio.playBlip(600);
+        if (backendRef.current) { postAction({ action: "signal_extension" }); return; }
         setSignalExtended(true);
         setZones((prev) => prev.map((z) => (z.id === "venue" ? { ...z, value: clamp(z.value - 9, 10, 95) } : z)));
         setActionLog((l) => [...l, `T+${clock}m — Extended green phase (+25s) to flush ${city.venueName} gates`]);
@@ -1262,12 +1278,14 @@
 
       function adjustShuttle(zoneId, delta) {
         audio.playBlip(550 + delta * 50);
+        if (backendRef.current) { postAction({ action: "adjust_shuttle", zone: zoneId, delta }); return; }
         setShuttles((prev) => ({ ...prev, [zoneId]: clamp((prev[zoneId] || 8) + delta, 0, 32) }));
       }
 
       function applyShuttleShift() {
         if (!recs.transit) return;
         audio.playBlip(720);
+        if (backendRef.current) { postAction({ action: "shift_shuttles" }); return; }
         const { stressed, relief } = recs.transit;
         setShuttles((prev) => ({
           ...prev,
@@ -1281,6 +1299,7 @@
       function applyHotelRedirect() {
         if (!recs.hotel) return;
         audio.playBlip(680);
+        if (backendRef.current) { postAction({ action: "hotel_redirect" }); return; }
         const { stressed, relief } = recs.hotel;
         setZones((prev) =>
           prev.map((z) => {
@@ -1404,14 +1423,14 @@
 
               {/* Simulation Transport Controls (CrowdFlow reference) */}
               <button
-                onClick={() => { audio.playBlip(480); setRunning((r) => !r); }}
+                onClick={() => { audio.playBlip(480); const n = !running; if (backendRef.current) postAction({ action: "set_running", running: n }); setRunning(n); }}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-[#121926] border border-[#263042] hover:border-[#8B7CF6] rounded text-xs font-mono transition-all cursor-pointer"
                 title="Play / pause the simulation clock"
               >
                 {running ? "⏸ Pause" : "▶ Play"}
               </button>
               <button
-                onClick={() => { audio.playBlip(520); setSpeedMult((s) => (s >= 4 ? 1 : s * 2)); }}
+                onClick={() => { audio.playBlip(520); const n = speedMult >= 4 ? 1 : speedMult * 2; if (backendRef.current) postAction({ action: "set_speed", speed: n }); setSpeedMult(n); }}
                 className="text-xs font-mono px-2.5 py-1.5 bg-[#121926] border border-[#263042] hover:border-[#8B7CF6] rounded transition-all cursor-pointer"
                 title="How fast the clock runs"
               >
@@ -1499,6 +1518,11 @@
               <span className="text-emerald-400 flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 beacon-pulse"></span> Live — updating every few seconds
               </span>
+              {backendMode && (
+                <span className="px-2 py-0.5 rounded border font-mono text-[#4FD8E0] border-[#4FD8E0]/40 bg-[#4FD8E0]/10" title="The FastAPI backend owns this zone state and writes decision_logs + active_alerts to traffic_data.sqlite.">
+                  ⚡ BACKEND SYNC
+                </span>
+              )}
               <span className="px-2 py-0.5 rounded border font-mono" style={{ color: phaseInfo.color, borderColor: phaseInfo.color + "55", background: phaseInfo.color + "14" }}>
                 {phaseInfo.label}
               </span>

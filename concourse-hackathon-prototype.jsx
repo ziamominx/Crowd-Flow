@@ -714,6 +714,12 @@
       const [speedMult, setSpeedMult] = useState(1);
       const [toasts, setToasts] = useState([]);
 
+      // Backend sync — when a /zone_state backend is reachable it OWNS the simulation
+      const [backendMode, setBackendMode] = useState(false);
+      const [backendStatus, setBackendStatus] = useState("offline");
+      const backendRef = useRef(false);
+      const backendPhaseRef = useRef("");
+
       // AI Telemetry
       const [briefing, setBriefing] = useState("");
       const [briefingLoading, setBriefingLoading] = useState(false);
@@ -744,6 +750,83 @@
         setToasts((t) => [...t.slice(-3), { id, text, kind }]);
         setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4200);
       }, []);
+
+      // ── Backend-owned state (server sim supersedes the local one) ──
+      function hydrateFromBackend(s) {
+        if (!s || !Array.isArray(s.zones) || s.zones.length === 0) return;
+        const zs = s.zones.map((z) => ({
+          ...z,
+          history: Array.isArray(z.history) ? z.history : [],
+          forecast: z.forecast ?? z.value,
+          speed: z.speed ?? 40,
+          flow: z.flow ?? 0
+        }));
+        setZones(zs);
+        if (Array.isArray(s.schedule) && s.schedule.length) setSchedule(s.schedule.map((p) => ({ ...p })));
+        if (typeof s.clock === "number") setClock(s.clock);
+        setOverflowActive(!!s.overflowActive);
+        if (s.shuttles) setShuttles(s.shuttles);
+        if (s.cityId && s.cityId !== selectedCityKey) setSelectedCityKey(s.cityId);
+        backendPhaseRef.current = s.phase || backendPhaseRef.current;
+      }
+
+      async function postAction(payload) {
+        if (!backendRef.current) return null;
+        try {
+          const r = await fetch("/zone_state/action", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+          if (!r.ok) return null;
+          const s = await r.json();
+          if (s && Array.isArray(s.zones)) hydrateFromBackend(s);
+          return s;
+        } catch (e) { return null; }
+      }
+
+      // Probe: is there a zone-state backend behind this page?
+      useEffect(() => {
+        const ctrl = new AbortController();
+        const to = setTimeout(() => ctrl.abort(), 2500);
+        fetch("/zone_state", { signal: ctrl.signal })
+          .then((r) => (r.ok ? r.json() : Promise.reject(new Error("not a backend"))))
+          .then((s) => {
+            if (!s || !Array.isArray(s.zones)) throw new Error("bad payload");
+            backendRef.current = true;
+            setBackendStatus("live");
+            hydrateFromBackend(s);
+            setBackendMode(true);
+            pushToast("🔌 Backend producer online — the server owns zone state and writes traffic_data.sqlite.", "good");
+          })
+          .catch(() => { backendRef.current = false; setBackendStatus("offline"); })
+          .finally(() => clearTimeout(to));
+        return () => { clearTimeout(to); ctrl.abort(); };
+      }, []);
+
+      // Poll the backend-owned state every 2s (server is the source of truth)
+      useEffect(() => {
+        if (!backendMode) return;
+        const iv = setInterval(async () => {
+          try {
+            const r = await fetch("/zone_state");
+            if (!r.ok) throw new Error("poll failed");
+            hydrateFromBackend(await r.json());
+          } catch (e) { /* keep last state */ }
+        }, 2000);
+        return () => clearInterval(iv);
+      }, [backendMode]);
+
+      // Phase-change toasts in backend mode (the local sim loop is parked)
+      useEffect(() => {
+        if (!backendMode) return;
+        const ph = phaseAt(schedule, 960 + clock);
+        if (backendPhaseRef.current && backendPhaseRef.current !== ph) {
+          if (ph === "exit") pushToast(`🚪 ${city.venueName} exit phase has started — egress pressure is building on transit and the corridor.`, "warn");
+          if (ph === "ended") pushToast(`🏁 ${city.venueName} event window has closed — crowd pressure is dispersing.`, "info");
+        }
+        backendPhaseRef.current = ph;
+      }, [schedule, clock, backendMode]);
 
       // One simulated physics step for all zones (shared by tick, skip & reset)
       function advanceZones(prev, scriptedStep, phaseId = "ended", overflowOn = false) {
@@ -800,6 +883,7 @@
       // Simulation transport controls (CrowdFlow reference)
       function handleSkip() {
         audio.playBlip(500);
+        if (backendRef.current) { postAction({ action: "skip" }); pushToast(`⏩ +30 min fast-forward — inflow building at ${city.venueName}.`, "info"); return; }
         const next = clock + 30;
         setClock(next);
         setZones((prev) => advanceZones(prev, null, phaseAt(schedule, 960 + next), overflowActive));
@@ -808,6 +892,7 @@
 
       function handleReset() {
         audio.playBlip(380);
+        if (backendRef.current) { postAction({ action: "reset" }); setActionLog([]); pushToast("↺ Simulation reset — telemetry re-seeded to baseline.", "good"); return; }
         setZones(initCityZones(selectedCityKey));
         setShuttles(city.shuttleBaseline);
         setClock(0);
@@ -821,6 +906,12 @@
 
       function triggerShock(kind) {
         audio.playSurge();
+        const msgs = {
+          letout: "🎤 The concert just ended — 25,000 people are heading for transit and hotels.",
+          metro: "🚇 Metro disruption — trains are running at half capacity and the station is filling up.",
+          checkin: "🏨 Big check-in rush — hotel districts are filling up fast."
+        };
+        if (backendRef.current) { postAction({ action: "shock", kind }); pushToast(msgs[kind] || "⚡ Scenario injected on the backend.", "warn"); setActionLog((l) => [...l.slice(-49), `T+${clock}m — ${msgs[kind] || kind}`]); return; }
         const bumps = {
           letout: { venue: 20, transitHub: 12, transitE: 8, hotelN: 7, corridor: 14 },
           metro: { transitHub: 16, transitE: 9, corridor: 10, venue: -4 },
@@ -828,11 +919,6 @@
         };
         const b = bumps[kind];
         setZones((prev) => prev.map((z) => (b[z.id] ? { ...z, value: clamp(z.value + b[z.id], 5, 98) } : z)));
-        const msgs = {
-          letout: "🎤 The concert just ended — 25,000 people are heading for transit and hotels.",
-          metro: "🚇 Metro disruption — trains are running at half capacity and the station is filling up.",
-          checkin: "🏨 Big check-in rush — hotel districts are filling up fast."
-        };
         const msg = msgs[kind];
         pushToast(msg, "warn");
         setActionLog((l) => [...l.slice(-49), `T+${clock}m — ${msg}`]);
@@ -841,6 +927,13 @@
       // City Switcher
       function handleSelectCity(key) {
         audio.playBlip(800);
+        if (backendRef.current) {
+          setSelectedCityKey(key);
+          postAction({ action: "select_city", city: key });
+          setActionLog((l) => [...l, `T+${clock}m — Repositioned jurisdiction to ${CITIES_DATA[key]?.name || key}`]);
+          pushToast(`📍 Now viewing ${CITIES_DATA[key]?.name} (${CITIES_DATA[key]?.venueName}).`, "info");
+          return;
+        }
         setSelectedCityKey(key);
         const newCity = CITIES_DATA[key];
         setZones(initCityZones(key));
@@ -855,7 +948,7 @@
         pushToast(`📍 Now viewing ${newCity.name} (${newCity.venueName}).`, "info");
       }      // Simulation loop
       useEffect(() => {
-        if (!running) return;
+        if (!running || backendMode) return;
         const interval = setInterval(() => {
           const now = clockRef.current;
           const phId = phaseAt(scheduleRef.current, 960 + now);
@@ -873,7 +966,7 @@
         }, 3200 / speedMult);
 
         return () => clearInterval(interval);
-      }, [selectedCityKey, city, running, speedMult]);
+      }, [selectedCityKey, city, running, speedMult, backendMode]);
 
       // Alerts — venue capacity, last-mile queues, plus generic zone pressure
       const alerts = useMemo(() => {
@@ -999,6 +1092,18 @@
       // Event schedule controls — a schedule shift recomputes phases, re-drives physics, and pushes new alerts
       function shiftSchedule(kind) {
         audio.playBlip(620);
+        if (backendRef.current) {
+          postAction({ action: "shift_schedule", kind });
+          const bnotes = {
+            delay: `⏰ ${city.venueName} doors delayed 30 min — arrival pressure shifts later.`,
+            extend: "⏰ Main event extended 45 min — the exit surge is pushed later and softened.",
+            endearly: `🏁 ${city.venueName} ended early — the full egress surge is happening NOW.`
+          };
+          const note = bnotes[kind];
+          pushToast(note, "warn");
+          setActionLog((l) => [...l.slice(-49), `T+${clock}m — Schedule change (${kind}): ${note}`]);
+          return;
+        }
         if (kind === "endearly") setSurge({ active: true, step: 0 });
         setSchedule((prev) => {
           const next = prev.map((p) => ({ ...p }));
@@ -1025,6 +1130,7 @@
 
       function toggleOverflow() {
         audio.playBlip(560);
+        if (backendRef.current) { postAction({ action: "toggle_overflow" }); return; }
         setOverflowActive((prev) => {
           const next = !prev;
           setActionLog((l) => [...l.slice(-49), `T+${clock}m — Overflow / hold-queue control ${next ? "ACTIVATED" : "RELEASED"} at ${city.venueName}`]);
@@ -1035,6 +1141,7 @@
 
       function toggleRain() {
         audio.playBlip(440);
+        if (backendRef.current) { postAction({ action: "toggle_rain" }); return; }
         setIsRain((r) => {
           const next = !r;
           setActionLog((l) => [...l, `T+${clock}m — Weather state shifted to ${next ? "MONSOON FRICTION" : "CLEAR"}`]);
@@ -1045,6 +1152,7 @@
 
       function toggleEmergency() {
         audio.playBlip(320);
+        if (backendRef.current) { postAction({ action: "toggle_emergency" }); return; }
         setIsEmergency((e) => {
           const next = !e;
           setActionLog((l) => [...l, `T+${clock}m — Priority ambulance corridor ${next ? "ENGAGED" : "RELEASED"}`]);
@@ -1055,6 +1163,7 @@
 
       function applySignalExtension() {
         audio.playBlip(600);
+        if (backendRef.current) { postAction({ action: "signal_extension" }); return; }
         setSignalExtended(true);
         setZones((prev) => prev.map((z) => (z.id === "venue" ? { ...z, value: clamp(z.value - 9, 10, 95) } : z)));
         setActionLog((l) => [...l, `T+${clock}m — Extended green phase (+25s) to flush ${city.venueName} gates`]);
@@ -1064,12 +1173,14 @@
 
       function adjustShuttle(zoneId, delta) {
         audio.playBlip(550 + delta * 50);
+        if (backendRef.current) { postAction({ action: "adjust_shuttle", zone: zoneId, delta }); return; }
         setShuttles((prev) => ({ ...prev, [zoneId]: clamp((prev[zoneId] || 8) + delta, 0, 32) }));
       }
 
       function applyShuttleShift() {
         if (!recs.transit) return;
         audio.playBlip(720);
+        if (backendRef.current) { postAction({ action: "shift_shuttles" }); return; }
         const { stressed, relief } = recs.transit;
         setShuttles((prev) => ({
           ...prev,
@@ -1083,6 +1194,7 @@
       function applyHotelRedirect() {
         if (!recs.hotel) return;
         audio.playBlip(680);
+        if (backendRef.current) { postAction({ action: "hotel_redirect" }); return; }
         const { stressed, relief } = recs.hotel;
         setZones((prev) =>
           prev.map((z) => {
@@ -1206,14 +1318,14 @@
 
               {/* Simulation Transport Controls (CrowdFlow reference) */}
               <button
-                onClick={() => { audio.playBlip(480); setRunning((r) => !r); }}
+                onClick={() => { audio.playBlip(480); const n = !running; if (backendRef.current) postAction({ action: "set_running", running: n }); setRunning(n); }}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-[#121926] border border-[#263042] hover:border-[#8B7CF6] rounded text-xs font-mono transition-all cursor-pointer"
                 title="Play / pause the simulation clock"
               >
                 {running ? "⏸ Pause" : "▶ Play"}
               </button>
               <button
-                onClick={() => { audio.playBlip(520); setSpeedMult((s) => (s >= 4 ? 1 : s * 2)); }}
+                onClick={() => { audio.playBlip(520); const n = speedMult >= 4 ? 1 : speedMult * 2; if (backendRef.current) postAction({ action: "set_speed", speed: n }); setSpeedMult(n); }}
                 className="text-xs font-mono px-2.5 py-1.5 bg-[#121926] border border-[#263042] hover:border-[#8B7CF6] rounded transition-all cursor-pointer"
                 title="How fast the clock runs"
               >
@@ -1301,6 +1413,11 @@
               <span className="text-emerald-400 flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 beacon-pulse"></span> Live — updating every few seconds
               </span>
+              {backendMode && (
+                <span className="px-2 py-0.5 rounded border font-mono text-[#4FD8E0] border-[#4FD8E0]/40 bg-[#4FD8E0]/10" title="The FastAPI backend owns this zone state and writes decision_logs + active_alerts to traffic_data.sqlite.">
+                  ⚡ BACKEND SYNC
+                </span>
+              )}
               <span className="px-2 py-0.5 rounded border font-mono" style={{ color: phaseInfo.color, borderColor: phaseInfo.color + "55", background: phaseInfo.color + "14" }}>
                 {phaseInfo.label}
               </span>
