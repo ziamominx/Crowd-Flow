@@ -17,6 +17,8 @@ from traffic_ai.controller import SignalController
 from traffic_ai.schemas import IntersectionSnapshot
 
 import asyncio
+import os
+import time
 from contextlib import asynccontextmanager
 
 import osmnx as ox
@@ -93,6 +95,7 @@ from traffic_ai.events import CityEventTracker
 from traffic_ai.rl_agent import DeepRLRewardEngine, GlobalTrafficState
 from traffic_ai.pipeline import SnapshotProvider
 from traffic_ai.multi_vision import MultiCameraIngestor
+from traffic_ai.zone_state import ZoneStateEngine
 import threading
 import time
 
@@ -104,6 +107,22 @@ logger = SQLiteStorage(db_path="traffic_data.sqlite")
 event_tracker = CityEventTracker()
 mock_provider = MockEventProvider(seed=42, event_tracker=event_tracker)
 rl_engine = DeepRLRewardEngine()
+
+# Concourse zone grid — the backend owns this state and is the real producer
+# for decision_logs / active_alerts. The dashboard hydrates from it when reachable.
+zone_engine = ZoneStateEngine(storage=logger)
+ZONE_TICK_SECS = float(os.environ.get("ZONE_TICK_SECS", "3.0"))
+
+
+def zone_state_producer_loop():
+    """Background producer: advances the owned zone state and persists every
+    tick's decisions + transition alerts to traffic_data.sqlite."""
+    while True:
+        try:
+            zone_engine.tick()
+        except Exception as e:
+            print("ZoneState Producer Failure:", e)
+        time.sleep(zone_engine.tick_interval)
 
 city_graph = CityGraphPhysics()
 
@@ -144,6 +163,10 @@ def startup_yolo():
     print("Initializing Phase 1 Multi-Vision Deterministic Thread...")
     t = threading.Thread(target=background_multi_vision_loop, daemon=True)
     t.start()
+    # Zone-state producer — owns the Concourse grid and writes to SQLite
+    print(f"Starting ZoneState producer (tick every {ZONE_TICK_SECS}s)...")
+    tz = threading.Thread(target=zone_state_producer_loop, daemon=True)
+    tz.start()
 
 class PhaseOneProvider(SnapshotProvider):
     """Zero-Latency bridge extracting deterministic YOLO physics from the background state."""
@@ -909,6 +932,55 @@ try:
     app.mount("/static", StaticFiles(directory="."), name="static2")
 except Exception as e:
     print("Static map mount failed:", e)
+
+# ==================== CONCOURSE ZONE-STATE API ====================
+# The dashboard hydrates from /zone_state when it can reach this backend;
+# the producer thread owns the state and writes traffic_data.sqlite.
+
+class ZoneAction(BaseModel):
+    action: str
+    city: Optional[str] = None
+    kind: Optional[str] = None
+    zone: Optional[str] = None
+    delta: Optional[int] = 0
+    running: Optional[bool] = None
+    speed: Optional[int] = None
+
+@app.get("/zone_state")
+def get_zone_state(city: Optional[str] = None):
+    """Full owned zone-grid state (cities, zones, schedule, phase, toggles)."""
+    return zone_engine.snapshot(city)
+
+@app.post("/zone_state/action")
+def zone_state_action(payload: ZoneAction):
+    """Organizer / visitor controls that re-drive the owned physics.
+
+    Actions: select_city, reset, skip, shift_schedule (delay|extend|endearly),
+    toggle_overflow, shock (letout|metro|checkin), toggle_rain,
+    toggle_emergency, adjust_shuttle, shift_shuttles, hotel_redirect,
+    signal_extension, set_running, set_speed.
+    """
+    result = zone_engine.apply_action(payload.action, {
+        "city": payload.city,
+        "kind": payload.kind,
+        "zone": payload.zone,
+        "delta": payload.delta,
+        "running": payload.running,
+        "speed": payload.speed,
+    })
+    if result is None:
+        raise HTTPException(status_code=400, detail=f"Unknown zone action '{payload.action}'")
+    return result
+
+@app.get("/zone_state/history")
+def get_zone_history(limit: int = 20, city: Optional[str] = None):
+    """Recent producer decision rows (zone snapshots + decisions)."""
+    return zone_engine.storage.fetch_zone_decisions(limit=min(limit, 200), city=city)
+
+@app.get("/zone_state/alerts")
+def get_zone_alerts(limit: int = 20, city: Optional[str] = None):
+    """Recent producer alert rows (venue capacity, last-mile, schedule shifts)."""
+    return zone_engine.storage.fetch_zone_alerts(limit=min(limit, 200), city=city)
 
 if __name__ == "__main__":
     import uvicorn
