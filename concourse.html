@@ -819,6 +819,12 @@
       const [speedMult, setSpeedMult] = useState(1);
       const [toasts, setToasts] = useState([]);
 
+      // Backend sync — when a /zone_state backend is reachable it OWNS the simulation
+      const [backendMode, setBackendMode] = useState(false);
+      const [backendStatus, setBackendStatus] = useState("offline");
+      const backendRef = useRef(false);
+      const backendPhaseRef = useRef("");
+
       // AI Telemetry
       const [briefing, setBriefing] = useState("");
       const [briefingLoading, setBriefingLoading] = useState(false);
@@ -849,6 +855,83 @@
         setToasts((t) => [...t.slice(-3), { id, text, kind }]);
         setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4200);
       }, []);
+
+      // ── Backend-owned state (server sim supersedes the local one) ──
+      function hydrateFromBackend(s) {
+        if (!s || !Array.isArray(s.zones) || s.zones.length === 0) return;
+        const zs = s.zones.map((z) => ({
+          ...z,
+          history: Array.isArray(z.history) ? z.history : [],
+          forecast: z.forecast ?? z.value,
+          speed: z.speed ?? 40,
+          flow: z.flow ?? 0
+        }));
+        setZones(zs);
+        if (Array.isArray(s.schedule) && s.schedule.length) setSchedule(s.schedule.map((p) => ({ ...p })));
+        if (typeof s.clock === "number") setClock(s.clock);
+        setOverflowActive(!!s.overflowActive);
+        if (s.shuttles) setShuttles(s.shuttles);
+        if (s.cityId && s.cityId !== selectedCityKey) setSelectedCityKey(s.cityId);
+        backendPhaseRef.current = s.phase || backendPhaseRef.current;
+      }
+
+      async function postAction(payload) {
+        if (!backendRef.current) return null;
+        try {
+          const r = await fetch("/zone_state/action", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+          if (!r.ok) return null;
+          const s = await r.json();
+          if (s && Array.isArray(s.zones)) hydrateFromBackend(s);
+          return s;
+        } catch (e) { return null; }
+      }
+
+      // Probe: is there a zone-state backend behind this page?
+      useEffect(() => {
+        const ctrl = new AbortController();
+        const to = setTimeout(() => ctrl.abort(), 2500);
+        fetch("/zone_state", { signal: ctrl.signal })
+          .then((r) => (r.ok ? r.json() : Promise.reject(new Error("not a backend"))))
+          .then((s) => {
+            if (!s || !Array.isArray(s.zones)) throw new Error("bad payload");
+            backendRef.current = true;
+            setBackendStatus("live");
+            hydrateFromBackend(s);
+            setBackendMode(true);
+            pushToast("🔌 Backend producer online — the server owns zone state and writes traffic_data.sqlite.", "good");
+          })
+          .catch(() => { backendRef.current = false; setBackendStatus("offline"); })
+          .finally(() => clearTimeout(to));
+        return () => { clearTimeout(to); ctrl.abort(); };
+      }, []);
+
+      // Poll the backend-owned state every 2s (server is the source of truth)
+      useEffect(() => {
+        if (!backendMode) return;
+        const iv = setInterval(async () => {
+          try {
+            const r = await fetch("/zone_state");
+            if (!r.ok) throw new Error("poll failed");
+            hydrateFromBackend(await r.json());
+          } catch (e) { /* keep last state */ }
+        }, 2000);
+        return () => clearInterval(iv);
+      }, [backendMode]);
+
+      // Phase-change toasts in backend mode (the local sim loop is parked)
+      useEffect(() => {
+        if (!backendMode) return;
+        const ph = phaseAt(schedule, 960 + clock);
+        if (backendPhaseRef.current && backendPhaseRef.current !== ph) {
+          if (ph === "exit") pushToast(`🚪 ${city.venueName} exit phase has started — egress pressure is building on transit and the corridor.`, "warn");
+          if (ph === "ended") pushToast(`🏁 ${city.venueName} event window has closed — crowd pressure is dispersing.`, "info");
+        }
+        backendPhaseRef.current = ph;
+      }, [schedule, clock, backendMode]);
 
       // One simulated physics step for all zones (shared by tick, skip & reset)
       function advanceZones(prev, scriptedStep, phaseId = "ended", overflowOn = false) {
@@ -960,7 +1043,7 @@
         pushToast(`📍 Now viewing ${newCity.name} (${newCity.venueName}).`, "info");
       }      // Simulation loop
       useEffect(() => {
-        if (!running) return;
+        if (!running || backendMode) return;
         const interval = setInterval(() => {
           const now = clockRef.current;
           const phId = phaseAt(scheduleRef.current, 960 + now);
@@ -978,7 +1061,7 @@
         }, 3200 / speedMult);
 
         return () => clearInterval(interval);
-      }, [selectedCityKey, city, running, speedMult]);
+      }, [selectedCityKey, city, running, speedMult, backendMode]);
 
       // Alerts — venue capacity, last-mile queues, plus generic zone pressure
       const alerts = useMemo(() => {
