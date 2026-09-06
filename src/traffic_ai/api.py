@@ -42,6 +42,12 @@ async def lifespan(app: FastAPI):
         active_hotspots[location] = data
         
     asyncio.create_task(fetch_predicthq_events())
+
+    # NOTE: Starlette 1.x removed the legacy @app.on_event("startup") hook, so
+    # background threads must be started from the lifespan context manager.
+    threading.Thread(target=background_multi_vision_loop, daemon=True).start()
+    threading.Thread(target=zone_state_producer_loop, daemon=True).start()
+    print(f"ZoneState producer started (tick every {ZONE_TICK_SECS}s)...")
     yield
 
 # MLOps: Initialize the FastAPI Application
@@ -158,15 +164,7 @@ def background_multi_vision_loop():
             print("Multi-Vision Async Failure:", e)
         time.sleep(0.5)
 
-@app.on_event("startup")
-def startup_yolo():
-    print("Initializing Phase 1 Multi-Vision Deterministic Thread...")
-    t = threading.Thread(target=background_multi_vision_loop, daemon=True)
-    t.start()
-    # Zone-state producer — owns the Concourse grid and writes to SQLite
-    print(f"Starting ZoneState producer (tick every {ZONE_TICK_SECS}s)...")
-    tz = threading.Thread(target=zone_state_producer_loop, daemon=True)
-    tz.start()
+
 
 class PhaseOneProvider(SnapshotProvider):
     """Zero-Latency bridge extracting deterministic YOLO physics from the background state."""
