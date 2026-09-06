@@ -320,14 +320,53 @@
 
     // Inter-zone transport links (same zone topology in every city)
     const CITY_ROUTES = [
-      { id: "r1", from: "venue", to: "transitHub", mode: "Metro", eta: 8 },
-      { id: "r2", from: "venue", to: "transitE", mode: "Shuttle", eta: 12 },
-      { id: "r3", from: "venue", to: "corridor", mode: "Shuttle", eta: 10 },
-      { id: "r4", from: "transitHub", to: "hotelN", mode: "Metro", eta: 14 },
-      { id: "r5", from: "transitE", to: "hotelS", mode: "Metro", eta: 16 },
-      { id: "r6", from: "transitHub", to: "corridor", mode: "Bus", eta: 18 },
-      { id: "r7", from: "transitE", to: "corridor", mode: "Bus", eta: 20 }
+      { id: "r1", from: "venue", to: "transitHub", mode: "Metro", eta: 8, lastMile: { mode: "Walk", mins: 9, queue: "transitHub" } },
+      { id: "r2", from: "venue", to: "transitE", mode: "Shuttle", eta: 12, lastMile: { mode: "Walk", mins: 5, queue: "transitE" } },
+      { id: "r3", from: "venue", to: "corridor", mode: "Shuttle", eta: 10, lastMile: { mode: "Walk", mins: 4, queue: "corridor" } },
+      { id: "r4", from: "transitHub", to: "hotelN", mode: "Metro", eta: 14, lastMile: { mode: "Local Shuttle", mins: 7, queue: "transitHub" } },
+      { id: "r5", from: "transitE", to: "hotelS", mode: "Metro", eta: 16, lastMile: { mode: "Walk", mins: 11, queue: "transitE" } },
+      { id: "r6", from: "transitHub", to: "corridor", mode: "Bus", eta: 18, lastMile: { mode: "Walk", mins: 3, queue: "transitHub" } },
+      { id: "r7", from: "transitE", to: "corridor", mode: "Bus", eta: 20, lastMile: { mode: "Local Shuttle", mins: 8, queue: "transitE" } }
     ];
+
+    // Per-city event schedule factory — time-blocked phases drive the live zone physics
+    function makeSchedule({ doors = 1080, doorLen = 50, mainLen = 90, interLen = 30, exitLen = 70 }) {
+      const d = doors, m = d + doorLen, i = m + mainLen, e = i + interLen;
+      return [
+        { id: "doors", label: "Doors Open", start: d, end: m, color: "#38BDF8" },
+        { id: "main", label: "Main Event", start: m, end: i, color: "#A78BFA" },
+        { id: "intermission", label: "Intermission", start: i, end: e, color: "#F5A623" },
+        { id: "exit", label: "Exit", start: e, end: e + exitLen, color: "#FF5C6C" }
+      ];
+    }
+
+    // Phase → per-zone load force applied every 5-min physics tick (event-schedule scenario)
+    const PHASE_FORCES = {
+      pre: { venue: 0.5, transitHub: 0.4, transitE: 0.2, corridor: 0.3 },
+      doors: { venue: 2.9, transitHub: 1.1, transitE: 0.6, corridor: 0.7, hotelN: 0.3 },
+      main: { venue: 1.2, hotelN: 0.6, hotelS: 0.4, corridor: 0.5, transitHub: 0.3 },
+      intermission: { venue: -0.8, transitHub: 1.4, transitE: 1.0, hotelN: 0.6, corridor: 0.4 },
+      exit: { venue: -3.2, transitHub: 2.9, transitE: 1.6, hotelS: 0.9, corridor: 1.8, hotelN: 0.5 },
+      ended: { venue: -2.5, transitHub: 1.0, transitE: 0.8, corridor: 0.6 }
+    };
+
+    function phaseAt(schedule, clock) {
+      if (!schedule || schedule.length === 0) return "ended";
+      if (clock < schedule[0].start) return "pre";
+      if (clock >= schedule[schedule.length - 1].end) return "ended";
+      for (const p of schedule) if (clock >= p.start && clock < p.end) return p.id;
+      return schedule[schedule.length - 1].id;
+    }
+
+    // Venue capacity state machine — distinct from generic "critical" zone load
+    function venueState(z) {
+      if (!z || z.type !== "venue") return null;
+      const v = z.value;
+      if (v >= 96) return { state: "atCapacity", wait: clamp(Math.round((v - 90) * 2.2), 5, 90), label: "AT CAPACITY" };
+      if (v >= 82) return { state: "critical", wait: clamp(Math.round((v - 80) * 1.4), 5, 30), label: "NEAR CAPACITY" };
+      if (v >= 68) return { state: "warning", wait: 0, label: "FILLING UP" };
+      return { state: "open", wait: 0, label: "OPEN" };
+    }
 
     const CITIES_DATA = {
       navimumbai: {
@@ -336,6 +375,7 @@
         flag: "🇮🇳",
         venueName: "Pillai College of Engineering Campus",
         eventName: "Alegria Festival — Main Concert (50,000+ footfall)",
+        schedule: makeSchedule({ doors: 1080, doorLen: 50, mainLen: 90, interLen: 30, exitLen: 70 }),
         coords: "19.0176° N, 73.1062° E",
         currency: "₹",
         speedUnit: "km/h",
@@ -358,6 +398,7 @@
         flag: "🇬🇧",
         venueName: "Wembley Stadium",
         eventName: "UEFA European Final & World Arena Concert",
+        schedule: makeSchedule({ doors: 1050, doorLen: 60, mainLen: 100, interLen: 30, exitLen: 80 }),
         coords: "51.5560° N, 0.2795° W",
         currency: "£",
         speedUnit: "mph",
@@ -380,6 +421,7 @@
         flag: "🇺🇸",
         venueName: "MetLife Stadium",
         eventName: "World Cup Finals & Summer Music Festival",
+        schedule: makeSchedule({ doors: 1080, doorLen: 60, mainLen: 100, interLen: 30, exitLen: 70 }),
         coords: "40.8128° N, 74.0742° W",
         currency: "$",
         speedUnit: "mph",
@@ -402,6 +444,7 @@
         flag: "🇯🇵",
         venueName: "Japan National Stadium",
         eventName: "World Athletics Championships & Tech Expo",
+        schedule: makeSchedule({ doors: 1030, doorLen: 60, mainLen: 120, interLen: 30, exitLen: 60 }),
         coords: "35.6778° N, 139.7145° E",
         currency: "¥",
         speedUnit: "km/h",
@@ -424,6 +467,7 @@
         flag: "🇮🇳",
         venueName: "Kanteerava Stadium & KTPO",
         eventName: "GIDS Global Developer Summit & IPL Match",
+        schedule: makeSchedule({ doors: 1070, doorLen: 50, mainLen: 100, interLen: 30, exitLen: 60 }),
         coords: "12.9716° N, 77.5946° E",
         currency: "₹",
         speedUnit: "km/h",
@@ -446,6 +490,7 @@
         flag: "🇦🇪",
         venueName: "Coca-Cola Arena & Expo City",
         eventName: "World Government Summit & Mega Concert",
+        schedule: makeSchedule({ doors: 1080, doorLen: 60, mainLen: 75, interLen: 30, exitLen: 50 }),
         coords: "25.2048° N, 55.2708° E",
         currency: "AED",
         speedUnit: "km/h",
@@ -753,6 +798,16 @@
       const [actionLog, setActionLog] = useState([]);
       const [clock, setClock] = useState(0);
 
+      // Event schedule state (per-city phases, editable mid-simulation)
+      const [schedule, setSchedule] = useState(() => CITIES_DATA.navimumbai.schedule.map((p) => ({ ...p })));
+      const [overflowActive, setOverflowActive] = useState(false);
+      const phaseInfo = useMemo(() => {
+        const ph = phaseAt(schedule, clock);
+        const p = schedule.find((x) => x.id === ph);
+        if (p) return { label: p.label, color: p.color };
+        return ph === "pre" ? { label: "Pre-Event", color: "#4FD8E0" } : { label: "Event Over", color: "#7C8AA0" };
+      }, [schedule, clock]);
+
       // Physics states
       const [isRain, setIsRain] = useState(false);
       const [isEmergency, setIsEmergency] = useState(false);
@@ -775,11 +830,18 @@
       const surgeRef = useRef(surge);
       const isRainRef = useRef(isRain);
       const isEmergencyRef = useRef(isEmergency);
+      const clockRef = useRef(clock);
+      const scheduleRef = useRef(schedule);
+      const overflowRef = useRef(overflowActive);
+      const lastPhaseRef = useRef(phaseAt(schedule, 0));
 
       useEffect(() => { shuttlesRef.current = shuttles; }, [shuttles]);
       useEffect(() => { surgeRef.current = surge; }, [surge]);
       useEffect(() => { isRainRef.current = isRain; }, [isRain]);
       useEffect(() => { isEmergencyRef.current = isEmergency; }, [isEmergency]);
+      useEffect(() => { clockRef.current = clock; }, [clock]);
+      useEffect(() => { scheduleRef.current = schedule; }, [schedule]);
+      useEffect(() => { overflowRef.current = overflowActive; }, [overflowActive]);
 
       // Toast feedback stack
       const pushToast = useCallback((text, kind = "info") => {
@@ -789,13 +851,16 @@
       }, []);
 
       // One simulated physics step for all zones (shared by tick, skip & reset)
-      function advanceZones(prev, scriptedStep) {
+      function advanceZones(prev, scriptedStep, phaseId = "ended", overflowOn = false) {
         return prev.map((z) => {
           const noise = (Math.random() - 0.5) * 3.5;
           let scripted = 0;
           if (scriptedStep != null && SURGE_SCRIPT[z.id] && scriptedStep < SURGE_SCRIPT[z.id].length) {
             scripted = SURGE_SCRIPT[z.id][scriptedStep];
           }
+
+          const phaseForce = (PHASE_FORCES[phaseId] && PHASE_FORCES[phaseId][z.id]) || 0;
+          const overflowEffect = overflowOn && z.id === "venue" ? -4.5 : overflowOn && (z.id === "corridor" || z.id === "transitHub") ? 1.2 : 0;
 
           let shuttleEffect = 0;
           if (z.type === "transit") {
@@ -807,7 +872,7 @@
           let emergencyEffect = (isEmergencyRef.current && z.type === "transit") ? -6.0 : 0;
           const reversion = (z.baseline - z.value) * 0.08;
 
-          const nextVal = clamp(z.value + noise + scripted - shuttleEffect + weatherEffect + emergencyEffect + reversion, 5, 98);
+          const nextVal = clamp(z.value + noise + scripted - shuttleEffect + weatherEffect + emergencyEffect + phaseForce + overflowEffect + reversion, 5, 98);
           const history = [...z.history, { t: z.history[z.history.length - 1].t + 1, v: nextVal }].slice(-14);
 
           const recent = history.slice(-4);
@@ -840,8 +905,9 @@
       // Simulation transport controls (CrowdFlow reference)
       function handleSkip() {
         audio.playBlip(500);
-        setClock((c) => c + 30);
-        setZones((prev) => advanceZones(prev, null));
+        const next = clock + 30;
+        setClock(next);
+        setZones((prev) => advanceZones(prev, null, phaseAt(schedule, next), overflowActive));
         pushToast(`⏩ +30 min fast-forward — inflow building at ${city.venueName}.`, "info");
       }
 
@@ -851,6 +917,9 @@
         setShuttles(city.shuttleBaseline);
         setClock(0);
         setSurge({ active: false, step: 0 });
+        setSchedule(city.schedule.map((p) => ({ ...p })));
+        setOverflowActive(false);
+        lastPhaseRef.current = "pre";
         setActionLog([]);
         pushToast("↺ Simulation reset — telemetry re-seeded to baseline.", "good");
       }
@@ -881,6 +950,9 @@
         const newCity = CITIES_DATA[key];
         setZones(initCityZones(key));
         setShuttles(newCity.shuttleBaseline);
+        setSchedule(newCity.schedule.map((p) => ({ ...p })));
+        setOverflowActive(false);
+        lastPhaseRef.current = phaseAt(newCity.schedule, 0);
         setSelectedId("venue");
         setBriefing("");
         setChatMessages([]);
@@ -890,7 +962,17 @@
       useEffect(() => {
         if (!running) return;
         const interval = setInterval(() => {
-          setZones((prev) => advanceZones(prev, surgeRef.current.active ? surgeRef.current.step : null));
+          const now = clockRef.current;
+          const phId = phaseAt(scheduleRef.current, now);
+          // Cascading schedule alerts — fire when the live event crosses phase boundaries
+          if (lastPhaseRef.current && lastPhaseRef.current !== phId && phId === "exit") {
+            pushToast(`🚪 ${city.venueName} exit phase has started — egress pressure is building on transit and the corridor.`, "warn");
+          }
+          if (lastPhaseRef.current && lastPhaseRef.current !== phId && phId === "ended") {
+            pushToast(`🏁 ${city.venueName} event window has closed — crowd pressure is dispersing.`, "info");
+          }
+          lastPhaseRef.current = phId;
+          setZones((prev) => advanceZones(prev, surgeRef.current.active ? surgeRef.current.step : null, phId, overflowRef.current));
           setClock((c) => c + 5);
           setSurge((s) => (s.active ? (s.step + 1 >= 6 ? { active: false, step: 0 } : { ...s, step: s.step + 1 }) : s));
         }, 3200 / speedMult);
