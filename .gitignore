@@ -17,3 +17,7 @@ data/
 
 # Agent workspace
 .freebuff/
+
+# Auto-sync watcher artifacts
+.auto-sync.log
+.auto-sync.pid
